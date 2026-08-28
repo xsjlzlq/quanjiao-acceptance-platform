@@ -761,7 +761,12 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
         for cbfbm, r_start, r_end in reversed(segments):
             if r_start < r_end:
                 for col_idx in [16, 15, 14, 13, 11, 9, 4, 3, 2]:
-                    t8.Cell(r_start, col_idx).Merge(t8.Cell(r_end, col_idx))
+                    if col_idx == 16:
+                        t8.Cell(r_start, col_idx).Merge(t8.Cell(r_end, col_idx))
+                    else:
+                        val = t8.Cell(r_start, col_idx).Range.Text.replace('\r', '').replace('\x07', '')
+                        t8.Cell(r_start, col_idx).Merge(t8.Cell(r_end, col_idx))
+                        t8.Cell(r_start, col_idx).Range.Text = val
                 cell_target = t8.Cell(r_start, 16)
             else:
                 cell_target = t8.Cell(r_start, 16)
