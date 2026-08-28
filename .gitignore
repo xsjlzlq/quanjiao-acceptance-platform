@@ -1,5 +1,6 @@
 # Node
 node_modules/
+node_modules_bad/
 dist/
 npm-debug.log*
 yarn-debug.log*
@@ -27,5 +28,9 @@ backend/downloads/*
 *~
 .DS_Store
 
-# Data files (keep sources directory clean if large)
-*.log
+# Temporary patch scripts
+patch*.js
+patch*.py
+test*.py
+inspect*.py
+fix*.js
