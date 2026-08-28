@@ -713,12 +713,8 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
             lxdh_val = str(r.get('lxdh', '') or r.get('联系电话', ''))
             cell_dh = t8.Cell(r_idx, 4)
             if r.get('phone_correct') == 'X':
-                cell_dh.Range.Text = lxdh_val + ' (X)' if lxdh_val else 'X'
-                rng_find = cell_dh.Range
-                rng_find.Find.ClearFormatting()
-                rng_find.Find.Text = 'X'
-                while rng_find.Find.Execute():
-                    rng_find.Font.Color = 255
+                cell_dh.Range.Text = 'X'
+                cell_dh.Range.Font.Color = 255
             else:
                 cell_dh.Range.Text = lxdh_val
 
@@ -773,17 +769,11 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
                         t8.Cell(r_start, col_idx).Merge(t8.Cell(r_end, col_idx))
                     else:
                         val = t8.Cell(r_start, col_idx).Range.Text.replace('\r', '').replace('\x07', '')
-                        is_red = (t8.Cell(r_start, col_idx).Range.Font.Color == 255)
+                        is_red = (t8.Cell(r_start, col_idx).Range.Font.Color == 255) or (val == 'X')
                         t8.Cell(r_start, col_idx).Merge(t8.Cell(r_end, col_idx))
                         t8.Cell(r_start, col_idx).Range.Text = val
                         if is_red:
                             t8.Cell(r_start, col_idx).Range.Font.Color = 255
-                        if col_idx == 4 and 'X' in val:
-                            rng_find = t8.Cell(r_start, col_idx).Range
-                            rng_find.Find.ClearFormatting()
-                            rng_find.Find.Text = 'X'
-                            while rng_find.Find.Execute():
-                                rng_find.Font.Color = 255
                 cell_target = t8.Cell(r_start, 16)
             else:
                 cell_target = t8.Cell(r_start, 16)
@@ -801,6 +791,11 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
             else:
                 cell_target.Range.Text = ""
 
+        for cell in t8.Range.Cells:
+            try:
+                cell.VerticalAlignment = 1
+            except:
+                pass
         doc8.SaveAs2(FileName=out_path, FileFormat=0)
         doc8.Close(0)
         doc8 = None
