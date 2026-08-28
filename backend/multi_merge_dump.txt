@@ -1,5 +1,0 @@
-Rows count: 9
-InlineShapes count: 3
-  Shape 1: width=65.44999694824219, height=26.200000762939453
-  Shape 2: width=65.44999694824219, height=26.200000762939453
-  Shape 3: width=65.44999694824219, height=26.200000762939453

@@ -1,5 +1,9 @@
 import base64
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
+import uuid
+import shutil, io
+from PIL import Image, ImageOps
 from doc_exporter import (
     export_docs, export_att4, export_att5, export_waiye_att8, export_waiye_att9,
     export_neiye_att6_township, export_neiye_att6_county, export_neiye_att7,
@@ -1237,3 +1241,54 @@ async def api_user_perms_all():
         perms = await auth_module.get_perms(u["username"])
         result.append({**u, "perms": perms})
     return {"code": 200, "users": result}
+
+# ================= 凭证图片上传 API =================
+os.makedirs(os.path.join(os.path.dirname(__file__), "uploads"), exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "uploads")), name="uploads")
+
+@app.post("/api/upload_evidence")
+async def api_upload_evidence(file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        filename = f"{uuid.uuid4().hex}.jpg"
+        target_path = os.path.join(os.path.dirname(__file__), "uploads", filename)
+        
+        # 自动压缩与修正方向（针对手机高清拍照，限制长边最大1920px，质量85%）
+        try:
+            img = Image.open(io.BytesIO(content))
+            img = ImageOps.exif_transpose(img) # 纠正手机拍照旋转角度
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            
+            # 长边超过 1920 时按比例等比缩放
+            max_size = 1920
+            if max(img.size) > max_size:
+                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            
+            img.save(target_path, "JPEG", quality=85, optimize=True)
+        except Exception:
+            # 如非标准图像格式直接保存原二进制
+            with open(target_path, "wb") as f:
+                f.write(content)
+                
+        return {"code": 200, "url": f"/uploads/{filename}", "filename": filename}
+    except Exception as e:
+        return {"code": 500, "message": f"上传处理失败: {str(e)}"}
+class DeleteEvidenceRequest(BaseModel):
+    url: str
+
+@app.post("/api/delete_evidence")
+async def api_delete_evidence(req: DeleteEvidenceRequest):
+    url = req.url
+    if not url:
+        return {"code": 400, "message": "缺少URL参数"}
+    try:
+        if url.startswith("/uploads/"):
+            filename = os.path.basename(url)
+            if ".." not in filename and "/" not in filename and "\" not in filename:
+                filepath = os.path.join(os.path.dirname(__file__), "uploads", filename)
+                if os.path.exists(filepath) and os.path.isfile(filepath):
+                    os.remove(filepath)
+        return {"code": 200, "message": "凭证已成功删除"}
+    except Exception as e:
+        return {"code": 500, "message": f"删除凭证异常: {str(e)}"}
