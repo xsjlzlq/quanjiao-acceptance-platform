@@ -45,11 +45,8 @@
             <div class="group-title">
               <div>
                 <div>{{ currentTownshipName }} / {{ currentVillageName }} / {{ currentGroupName }}</div>
-                <div v-if="autoSaveConfig.enabled" style="font-size: 11px; font-weight: normal; color: #999; margin-top: 2px;">
-                  <van-icon name="passed" color="#07c160" /> {{ autoSaveConfig.interval }}分钟自动保存已启用 <span v-if="lastAutoSaveTime">(上次保存: {{ lastAutoSaveTime }})</span>
-                </div>
-                <div v-else style="font-size: 11px; font-weight: normal; color: #999; margin-top: 2px;">
-                  <van-icon name="info-o" color="#faad14" /> 自动保存已关闭 <span style="color:#1989fa; cursor:pointer;" @click="$router.push('/settings')">(系统设置)</span>
+                <div style="font-size: 11px; font-weight: normal; color: #999; margin-top: 2px;">
+                  <van-icon name="passed" color="#07c160" /> 实时静默保存 <span v-if="lastAutoSaveTime">(上次同步: {{ lastAutoSaveTime }})</span>
                 </div>
               </div>
               <van-tag type="primary" size="medium">{{ groupSamples.length }} 块地</van-tag>
@@ -71,9 +68,7 @@
             </div>
 
             <div class="btn-actions">
-              <van-button v-if="hasPerm('waiye_save')" size="small" type="primary" round :loading="saving" @click="saveAll">
-                保存核查状态
-              </van-button>
+              
               <van-button v-if="hasPerm('waiye_export_att8')" size="small" type="success" round :loading="exportingGroupAtt8" @click="exportCurrentGroupAtt8">
                 导出该组附件8_外业组检查记录表
               </van-button>
@@ -86,128 +81,89 @@
           </div>
 
           <div 
-            v-for="(item, index) in groupSamples" 
-            :key="item.id"
+            v-for="(grp, index) in groupedSamples" 
+            :key="grp.cbfbm"
             class="parcel-card"
           >
-            <div class="parcel-header">
+            <!-- ================== 承包方层级信息 ================== -->
+            <div class="parcel-header" style="background: #eef5fe; padding: 12px 14px; border-bottom: 1px solid #ebedf0;">
               <div class="farmer-info">
-                <span class="index-badge">{{ index + 1 }}</span>
-                <span class="farmer-name">{{ item.cbfmc }}</span>
-                <span class="code-tag">编码: {{ item.cbfbm_short || item.cbfbm?.slice(-4) }}</span>
-                <van-button size="mini" type="primary" plain round style="margin-left:6px; padding: 0 6px;" @click="showMembers(item)">成员详情</van-button>
+                <span class="index-badge" style="background: #1989fa;">{{ index + 1 }}</span>
+                <span class="farmer-name" style="font-size: 16px;">{{ grp.cbfmc }}</span>
+                <span class="code-tag">编码: {{ grp.cbfbm_short }}</span>
+                <van-button size="mini" type="primary" plain round style="margin-left:6px; padding: 0 6px;" @click="showMembers(grp.parcels[0])">成员详情</van-button>
               </div>
               <a
-                v-if="item.lxdh"
-                :href="'tel:' + cleanPhone(item.lxdh)"
+                v-if="grp.lxdh"
+                :href="'tel:' + cleanPhone(grp.lxdh)"
                 class="phone-call-btn"
                 title="点击直接拨打电话"
-                @click.stop="handlePhoneClick(item.lxdh)"
+                @click.stop="handlePhoneClick(grp.lxdh)"
               >
                 <van-icon name="phone" color="#1989fa" />
-                <span>{{ item.lxdh }}</span>
+                <span>{{ grp.lxdh }}</span>
               </a>
             </div>
 
-            <div class="parcel-details">
+            <div class="parcel-details" style="background: #fafcff;">
               <div class="detail-row">
-                <span class="detail-label">地块名称：</span>
-                <span class="detail-val">{{ item.dkmc || '未命名地块' }}</span>
-                <span class="detail-label" style="margin-left: 12px;">简码：</span>
-                <span class="detail-val">{{ item.dkbm_short || item.dkbm?.slice(-5) || '-' }}</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">成果面积：</span>
-                <span class="detail-val" style="color: #e6a23c; font-weight: bold;">{{ item.scmj }} 亩</span>
-                <van-button size="mini" type="success" plain round style="margin-left:8px; padding: 0 6px;" @click="showBounds(item)">四至详情</van-button>
+                <span class="detail-label">合同总面积：</span>
+                <span class="detail-val" style="color: #e6a23c; font-weight: bold; font-size: 15px;">{{ grp.total_scmj }} 亩</span>
+                <span class="detail-label" style="margin-left: 12px; font-size: 12px; color: #999;">(汇总地块成果面积)</span>
               </div>
             </div>
 
-            <!-- 6项核查指标点击切换打 X -->
-            <div class="check-section">
-              <div class="section-tip">附件8 核查指标（发现错误点击打 X）：</div>
+            <!-- 承包方核查指标 -->
+            <div class="check-section" style="background: #fafcff; padding-bottom: 10px;">
+              <div class="section-tip">承包方核查指标（发现错误点击打 X）：</div>
               <div class="check-grid">
                 <van-button 
                   size="mini" 
-                  :type="item.area_acknowledged === 'X' ? 'danger' : 'default'"
-                  :plain="item.area_acknowledged !== 'X'"
+                  :type="grp.parcels[0].rights_correct === 'X' ? 'danger' : 'default'"
+                  :plain="grp.parcels[0].rights_correct !== 'X'"
                   round
                   class="check-btn"
-                  @click="toggleError(item, 'area_acknowledged')"
+                  @click="toggleContractorError(grp, 'rights_correct')"
                 >
-                  {{ item.area_acknowledged === 'X' ? '✗ 面积不认可(X)' : '是否认可确权面积' }}
+                  {{ grp.parcels[0].rights_correct === 'X' ? '✗ 权属不正确(X)' : '权属调查是否正确' }}
                 </van-button>
-
                 <van-button 
                   size="mini" 
-                  :type="item.rights_correct === 'X' ? 'danger' : 'default'"
-                  :plain="item.rights_correct !== 'X'"
+                  :type="grp.parcels[0].member_qualified === 'X' ? 'danger' : 'default'"
+                  :plain="grp.parcels[0].member_qualified !== 'X'"
                   round
                   class="check-btn"
-                  @click="toggleError(item, 'rights_correct')"
+                  @click="toggleContractorError(grp, 'member_qualified')"
                 >
-                  {{ item.rights_correct === 'X' ? '✗ 权属不正确(X)' : '权属调查是否正确' }}
+                  {{ grp.parcels[0].member_qualified === 'X' ? '✗ 成员不符合(X)' : '家庭成员组织资格' }}
                 </van-button>
-
                 <van-button 
                   size="mini" 
-                  :type="item.bound_correct === 'X' ? 'danger' : 'default'"
-                  :plain="item.bound_correct !== 'X'"
+                  :type="grp.parcels[0].self_signed === 'X' ? 'danger' : 'default'"
+                  :plain="grp.parcels[0].self_signed !== 'X'"
                   round
                   class="check-btn"
-                  @click="toggleError(item, 'bound_correct')"
+                  @click="toggleContractorError(grp, 'self_signed')"
                 >
-                  {{ item.bound_correct === 'X' ? '✗ 四至不正确(X)' : '地块四至是否正确' }}
-                </van-button>
-
-                <van-button 
-                  size="mini" 
-                  :type="item.member_qualified === 'X' ? 'danger' : 'default'"
-                  :plain="item.member_qualified !== 'X'"
-                  round
-                  class="check-btn"
-                  @click="toggleError(item, 'member_qualified')"
-                >
-                  {{ item.member_qualified === 'X' ? '✗ 成员不符合(X)' : '家庭成员组织资格' }}
-                </van-button>
-
-                <van-button 
-                  size="mini" 
-                  :type="item.self_verified === 'X' ? 'danger' : 'default'"
-                  :plain="item.self_verified !== 'X'"
-                  round
-                  class="check-btn"
-                  @click="toggleError(item, 'self_verified')"
-                >
-                  {{ item.self_verified === 'X' ? '✗ 非本人核实(X)' : '是否本人核实地块' }}
-                </van-button>
-
-                <van-button 
-                  size="mini" 
-                  :type="item.self_signed === 'X' ? 'danger' : 'default'"
-                  :plain="item.self_signed !== 'X'"
-                  round
-                  class="check-btn"
-                  @click="toggleError(item, 'self_signed')"
-                >
-                  {{ item.self_signed === 'X' ? '✗ 非本人签名(X)' : '是否本人签名确认' }}
+                  {{ grp.parcels[0].self_signed === 'X' ? '✗ 非本人签名(X)' : '是否本人签名确认' }}
                 </van-button>
               </div>
             </div>
 
-            <!-- 满意度与调查方式 及 签名 -->
-            <div class="survey-and-sig-row">
+            <!-- 承包方满意度与调查方式 及 签名 -->
+            <div class="survey-and-sig-row" style="background: #fafcff; border-bottom: 1px dashed #ebedf0; padding-bottom: 12px;">
               <div class="survey-col">
                 <div class="survey-item">
                   <span class="survey-label">是否满意：</span>
-                  <van-radio-group v-model="item.satisfaction" direction="horizontal">
+                  <!-- 由于所有 parcels 同步，我们可以直接绑定到 grp.parcels[0] -->
+                  <van-radio-group v-model="grp.parcels[0].satisfaction" direction="horizontal" @change="(v) => { grp.parcels.forEach(p => p.satisfaction = v); saveAllSilent(); }">
                     <van-radio name="满意" icon-size="14px">满意</van-radio>
                     <van-radio name="不满意" icon-size="14px">不满意</van-radio>
                   </van-radio-group>
                 </div>
                 <div class="survey-item" style="margin-top: 8px;">
                   <span class="survey-label">抽样方式：</span>
-                  <van-radio-group v-model="item.survey_method" direction="horizontal">
+                  <van-radio-group v-model="grp.parcels[0].survey_method" direction="horizontal" @change="(v) => { grp.parcels.forEach(p => p.survey_method = v); saveAllSilent(); }">
                     <van-radio name="现场" icon-size="14px">现场</van-radio>
                     <van-radio name="电话" icon-size="14px">电话</van-radio>
                   </van-radio-group>
@@ -215,10 +171,10 @@
               </div>
 
               <div class="sig-col">
-                <div class="signature-box-wrap-inline" @click="openSignModal(item)">
-                  <template v-if="item.signature_url">
+                <div class="signature-box-wrap-inline" @click="openSignModal(grp.parcels[0])">
+                  <template v-if="grp.parcels[0].signature_url">
                     <div class="sig-img-container-inline">
-                      <img :src="item.signature_url" alt="签名预览" class="sig-img-inline" />
+                      <img :src="grp.parcels[0].signature_url" alt="签名预览" class="sig-img-inline" />
                     </div>
                     <div class="sig-action-hint-inline">
                       <van-icon name="edit" /> 重签
@@ -234,6 +190,62 @@
               </div>
             </div>
 
+            <!-- ================== 地块层级信息 ================== -->
+            <div v-for="(item, pIndex) in grp.parcels" :key="item.id" class="parcel-sub-card" style="padding: 12px 14px; border-bottom: 1px solid #f2f3f5;">
+              <div class="parcel-details" style="padding: 0;">
+                <div class="detail-row">
+                  <span class="detail-label" style="color:#1989fa; font-weight:bold;">地块 {{ pIndex + 1 }}</span>
+                  <span class="detail-label" style="margin-left: 8px;">名称：</span>
+                  <span class="detail-val">{{ item.dkmc || '未命名地块' }}</span>
+                  <span class="detail-label" style="margin-left: 12px;">简码：</span>
+                  <span class="detail-val">{{ item.dkbm_short || item.dkbm?.slice(-5) || '-' }}</span>
+                </div>
+                <div class="detail-row" style="margin-top: 6px;">
+                  <span class="detail-label">成果面积：</span>
+                  <span class="detail-val" style="color: #666;">{{ item.scmj }} 亩</span>
+                  <van-button size="mini" type="success" plain round style="margin-left:8px; padding: 0 6px;" @click="showBounds(item)">四至详情</van-button>
+                </div>
+              </div>
+
+              <!-- 地块级核查指标 -->
+              <div class="check-section" style="padding: 8px 0 0 0;">
+                <div class="section-tip" style="padding-left:0; font-size: 12px;">地块核查指标（错误打 X）：</div>
+                <div class="check-grid" style="grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));">
+                  <van-button 
+                    size="mini" 
+                    :type="item.area_acknowledged === 'X' ? 'danger' : 'default'"
+                    :plain="item.area_acknowledged !== 'X'"
+                    round
+                    class="check-btn"
+                    @click="toggleError(item, 'area_acknowledged')"
+                  >
+                    {{ item.area_acknowledged === 'X' ? '✗ 面积不认可(X)' : '是否认可确权面积' }}
+                  </van-button>
+
+                  <van-button 
+                    size="mini" 
+                    :type="item.bound_correct === 'X' ? 'danger' : 'default'"
+                    :plain="item.bound_correct !== 'X'"
+                    round
+                    class="check-btn"
+                    @click="toggleError(item, 'bound_correct')"
+                  >
+                    {{ item.bound_correct === 'X' ? '✗ 四至不正确(X)' : '地块四至是否正确' }}
+                  </van-button>
+
+                  <van-button 
+                    size="mini" 
+                    :type="item.self_verified === 'X' ? 'danger' : 'default'"
+                    :plain="item.self_verified !== 'X'"
+                    round
+                    class="check-btn"
+                    @click="toggleError(item, 'self_verified')"
+                  >
+                    {{ item.self_verified === 'X' ? '✗ 非本人核实(X)' : '是否本人核实地块' }}
+                  </van-button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -463,6 +475,41 @@ const currentGroupName = ref('');
 const currentGroupCode = ref('');
 
 const groupSamples = ref([]);
+
+const groupedSamples = computed(() => {
+  const map = new Map();
+  for (const item of groupSamples.value) {
+    if (!map.has(item.cbfbm)) {
+      map.set(item.cbfbm, {
+        cbfmc: item.cbfmc,
+        cbfbm: item.cbfbm,
+        cbfbm_short: item.cbfbm_short || item.cbfbm?.slice(-4),
+        lxdh: item.lxdh,
+        parcels: [],
+        total_scmj: 0
+      });
+    }
+    const grp = map.get(item.cbfbm);
+    grp.parcels.push(item);
+    grp.total_scmj += Number(item.scmj || 0);
+  }
+  // Format total_scmj to 2 decimals
+  for (const grp of map.values()) {
+    grp.total_scmj = grp.total_scmj.toFixed(2);
+  }
+  return Array.from(map.values());
+});
+
+const toggleContractorError = async (grp, field) => {
+  if (!grp.parcels.length) return;
+  const isError = grp.parcels[0][field] === 'X';
+  const newVal = isError ? '' : 'X';
+  for (const p of grp.parcels) {
+    p[field] = newVal;
+  }
+  await saveAllSilent();
+};
+
 const saving = ref(false);
 const exportingGroupAtt8 = ref(false);
 
@@ -832,8 +879,9 @@ const loadGroupSamples = async (gCode, tName, vName, gName) => {
   }
 };
 
-const toggleError = (item, field) => {
+const toggleError = async (item, field) => {
   item[field] = item[field] === 'X' ? '' : 'X';
+  await saveAllSilent();
 };
 
 const totalErrorCount = computed(() => {
@@ -860,6 +908,30 @@ const effectScore = computed(() => {
   const score = (satisfiedCount / groupSamples.value.length) * 10.0;
   return score.toFixed(1);
 });
+
+const saveAllSilent = async () => {
+  if (groupSamples.value.length === 0) return;
+  try {
+    const payload = {
+      records: groupSamples.value.map(item => ({
+        id: item.id,
+        area_acknowledged: item.area_acknowledged,
+        rights_correct: item.rights_correct,
+        bound_correct: item.bound_correct,
+        member_qualified: item.member_qualified,
+        self_verified: item.self_verified,
+        self_signed: item.self_signed,
+        satisfaction: item.satisfaction,
+        survey_method: item.survey_method
+      }))
+    };
+    await axios.post('/api/waiye/save_records', payload);
+    const now = new Date();
+    lastAutoSaveTime.value = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+  } catch (e) {
+    console.warn('静默保存失败', e);
+  }
+};
 
 const saveAll = async () => {
   if (groupSamples.value.length === 0) return;
@@ -1093,6 +1165,7 @@ const saveSignature = async () => {
           p.signature_url = newUrl;
         }
       }
+      await saveAllSilent();
       showToast({ type: 'success', message: `【${targetCbfmc}】代表手写签名保存成功！` });
       closeSignModal();
     } else {

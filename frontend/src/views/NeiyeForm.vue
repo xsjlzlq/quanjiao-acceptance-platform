@@ -27,17 +27,14 @@
       <div class="score-display">
         <div>
           <div class="score-label">{{ selectedAreaName }} 内业得分：</div>
-          <div v-if="autoSaveConfig.enabled" style="font-size: 11px; font-weight: normal; color: #999; margin-top: 2px;">
-            <van-icon name="passed" color="#07c160" /> {{ autoSaveConfig.interval }}分钟自动保存已启用 <span v-if="lastAutoSaveTime">(上次保存: {{ lastAutoSaveTime }})</span>
-          </div>
-          <div v-else style="font-size: 11px; font-weight: normal; color: #999; margin-top: 2px;">
-            <van-icon name="info-o" color="#faad14" /> 自动保存已关闭 <span style="color:#1989fa; cursor:pointer;" @click="$router.push('/settings')">(系统设置)</span>
+          <div style="font-size: 11px; font-weight: normal; color: #999; margin-top: 2px;">
+            <van-icon name="passed" color="#07c160" /> 实时静默保存 <span v-if="lastAutoSaveTime">(上次同步: {{ lastAutoSaveTime }})</span>
           </div>
         </div>
         <div class="score-val">{{ totalScore }} <span class="score-max">/ {{ selectedAreaLevel === 'county' ? 15 : 70 }}分</span></div>
       </div>
       <div class="btn-group">
-        <van-button v-if="hasPerm('neiye_save')" size="small" type="primary" round :loading="saving" @click="onSubmit">保存评分</van-button>
+        
         
         <!-- Township Exports -->
         <template v-if="selectedAreaLevel === 'township'">
@@ -1554,7 +1551,7 @@ const loadSavedData = async (code) => {
   }
 };
 
-const toggle = (group, name) => {
+const toggle = async (group, name) => {
   const list = form.value[group];
   const idx = list.indexOf(name);
   if (idx > -1) {
@@ -1568,17 +1565,19 @@ const toggle = (group, name) => {
   } else {
     list.push(name);
   }
+  await silentAutoSave();
 };
 
-const onStepperChange = (field, name, newVal) => {
+const onStepperChange = async (field, name, newVal) => {
   if (newVal === 0) {
     const evidences = form.value.evidences && form.value.evidences[name];
     if (evidences && evidences.length > 0) {
       showToast({ type: 'fail', message: '已上传凭证，请先删除该项凭证后再清零！' });
-      // 恢复为 1
       form.value[field] = 1;
+      return;
     }
   }
+  await silentAutoSave();
 };
 
 const totalScore = computed(() => {
