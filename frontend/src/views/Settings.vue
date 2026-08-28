@@ -54,9 +54,9 @@
         <van-cell-group inset title="新增账号" style="margin-top: 16px;">
           <van-field v-model="newUsername" label="用户名" placeholder="请输入新用户名" />
           <div style="display: flex; gap: 8px; margin: 12px 16px;">
-            <van-button size="small" type="primary" style="flex:1" @click="onAddSingleUser">添加单账号</van-button>
+            <van-button size="small" type="primary" style="flex:1" @click="onAddSingleUser">添加账号</van-button>
             <van-uploader :after-read="onImportTxt" accept=".txt">
-              <van-button size="small" type="default">导入txt批量新增</van-button>
+              <van-button size="small" type="default">批量添加</van-button>
             </van-uploader>
           </div>
           <div class="setting-tip">
