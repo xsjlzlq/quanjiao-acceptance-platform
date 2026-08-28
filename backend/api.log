@@ -1,0 +1,539 @@
+2026-08-27 15:46:39,403 INFO sqlalchemy.engine.Engine select pg_catalog.version()
+2026-08-27 15:46:39,404 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-08-27 15:46:39,406 INFO sqlalchemy.engine.Engine select current_schema()
+2026-08-27 15:46:39,406 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-08-27 15:46:39,408 INFO sqlalchemy.engine.Engine show standard_conforming_strings
+2026-08-27 15:46:39,408 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-08-27 15:46:39,409 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:46:39,411 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 15:46:39,411 INFO sqlalchemy.engine.Engine [generated in 0.00052s] ()
+2026-08-27 15:46:39,420 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:49896 - "GET /api/hierarchy HTTP/1.1" 200 OK
+2026-08-27 15:46:44,428 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:46:44,429 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 15:46:44,429 INFO sqlalchemy.engine.Engine [cached since 5.018s ago] ()
+2026-08-27 15:46:44,435 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:49909 - "GET /api/hierarchy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49915 - "GET /api/export_rectify_att12?township_name=%E8%A5%84%E6%B2%B3%E9%95%87 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49918 - "GET /api/download?file=downloads/%E9%99%84%E4%BB%B612_%E6%95%B4%E6%94%B9%E9%80%9A%E7%9F%A5%E4%B9%A6_%E8%A5%84%E6%B2%B3%E9%95%87.doc HTTP/1.1" 200 OK
+2026-08-27 15:47:13,178 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:47:13,179 INFO sqlalchemy.engine.Engine SELECT form_data FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 15:47:13,180 INFO sqlalchemy.engine.Engine [generated in 0.00072s] ('341124100',)
+2026-08-27 15:47:13,185 INFO sqlalchemy.engine.Engine 
+            SELECT village_name, group_name, cbfmc,
+                   area_acknowledged, rights_correct, bound_correct,
+                   member_qualified, self_verified, self_signed
+            FROM waiye_samples WHERE township_name = $1
+        
+2026-08-27 15:47:13,185 INFO sqlalchemy.engine.Engine [generated in 0.00045s] ('ÏåºÓÕò',)
+2026-08-27 15:47:13,192 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:49939 - "GET /api/export_rectify_att13?township_code=341124100&township_name=%E8%A5%84%E6%B2%B3%E9%95%87 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49951 - "GET /api/download?file=downloads/%E9%99%84%E4%BB%B613_%E9%97%AE%E9%A2%98%E6%95%B4%E6%94%B9%E9%94%80%E5%8F%B7%E5%8F%B0%E8%B4%A6_%E8%A5%84%E6%B2%B3%E9%95%87.doc HTTP/1.1" 200 OK
+2026-08-27 15:48:56,353 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:48:56,354 INFO sqlalchemy.engine.Engine 
+            SELECT township_name, village_name, group_name, group_code, COUNT(*) as sample_count
+            FROM waiye_samples
+            GROUP BY township_name, village_name, group_name, group_code
+            ORDER BY township_name, village_name, group_name
+        
+2026-08-27 15:48:56,354 INFO sqlalchemy.engine.Engine [generated in 0.00048s] ()
+2026-08-27 15:48:56,357 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50116 - "GET /api/waiye/hierarchy HTTP/1.1" 200 OK
+2026-08-27 15:48:56,455 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:48:56,455 INFO sqlalchemy.engine.Engine 
+            SELECT township_name, village_name, group_name, group_code,
+                   COUNT(*) as parcel_count,
+                   COUNT(DISTINCT cbfbm) as farmer_count,
+                   SUM(CASE WHEN area_acknowledged = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN rights_correct = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN bound_correct = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN member_qualified = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN self_verified = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN self_signed = 'X' THEN 1 ELSE 0 END) as error_count,
+                   SUM(CASE WHEN satisfaction = 'ÂúÒâ' THEN 1 ELSE 0 END) as sat_count
+            FROM waiye_samples
+            GROUP BY township_name, village_name, group_name, group_code
+            ORDER BY township_name, village_name, group_name
+        
+2026-08-27 15:48:56,456 INFO sqlalchemy.engine.Engine [generated in 0.00067s] ()
+2026-08-27 15:48:56,480 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50119 - "GET /api/waiye/townships_summary HTTP/1.1" 200 OK
+2026-08-27 15:48:56,798 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:48:56,799 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 15:48:56,799 INFO sqlalchemy.engine.Engine [cached since 137.4s ago] ()
+2026-08-27 15:48:56,846 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50124 - "GET /api/villages HTTP/1.1" 200 OK
+2026-08-27 15:49:01,078 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:49:01,079 INFO sqlalchemy.engine.Engine 
+                SELECT id, township_name, village_name, group_name, group_code,
+                       cbfmc, cbfbm, cbfbm_short, lxdh, dkmc, dkbm, dkbm_short, scmj,
+                       area_acknowledged, rights_correct, bound_correct, member_qualified,
+                       self_verified, self_signed, satisfaction, survey_method, signature_url
+                FROM waiye_samples
+                WHERE group_code = $1
+                ORDER BY id
+            
+2026-08-27 15:49:01,079 INFO sqlalchemy.engine.Engine [generated in 0.00043s] ('34112410020618',)
+2026-08-27 15:49:01,084 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50139 - "GET /api/waiye/group_samples?group_code=34112410020618&township_name=%E8%A5%84%E6%B2%B3%E9%95%87&village_name=%E5%85%AB%E6%B3%A2%E6%9D%91&group_name=%E5%9D%9D%E8%A5%BF%E7%BB%84 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50144 - "GET /api/signature_image?cbfbm=341124100206180022&v=1787795014 HTTP/1.1" 200 OK
+2026-08-27 15:49:15,637 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:49:15,638 INFO sqlalchemy.engine.Engine 
+            UPDATE waiye_samples SET
+                area_acknowledged = $1,
+                rights_correct = $2,
+                bound_correct = $3,
+                member_qualified = $4,
+                self_verified = $5,
+                self_signed = $6,
+                satisfaction = $7,
+                survey_method = $8,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $9
+        
+2026-08-27 15:49:15,638 INFO sqlalchemy.engine.Engine [generated in 0.00052s] ('', '', 'X', '', '', 'X', 'ÂúÒâ', 'ÏÖ³¡', 287)
+2026-08-27 15:49:15,649 INFO sqlalchemy.engine.Engine 
+            UPDATE waiye_samples SET
+                area_acknowledged = $1,
+                rights_correct = $2,
+                bound_correct = $3,
+                member_qualified = $4,
+                self_verified = $5,
+                self_signed = $6,
+                satisfaction = $7,
+                survey_method = $8,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $9
+        
+2026-08-27 15:49:15,649 INFO sqlalchemy.engine.Engine [cached since 0.01159s ago] ('', '', '', '', '', '', 'ÂúÒâ', 'ÏÖ³¡', 288)
+2026-08-27 15:49:15,650 INFO sqlalchemy.engine.Engine 
+            UPDATE waiye_samples SET
+                area_acknowledged = $1,
+                rights_correct = $2,
+                bound_correct = $3,
+                member_qualified = $4,
+                self_verified = $5,
+                self_signed = $6,
+                satisfaction = $7,
+                survey_method = $8,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $9
+        
+2026-08-27 15:49:15,651 INFO sqlalchemy.engine.Engine [cached since 0.01319s ago] ('', '', '', '', '', 'X', 'ÂúÒâ', 'ÏÖ³¡', 289)
+2026-08-27 15:49:15,653 INFO sqlalchemy.engine.Engine 
+            UPDATE waiye_samples SET
+                area_acknowledged = $1,
+                rights_correct = $2,
+                bound_correct = $3,
+                member_qualified = $4,
+                self_verified = $5,
+                self_signed = $6,
+                satisfaction = $7,
+                survey_method = $8,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $9
+        
+2026-08-27 15:49:15,653 INFO sqlalchemy.engine.Engine [cached since 0.0157s ago] ('', '', '', '', '', '', 'ÂúÒâ', 'ÏÖ³¡', 290)
+2026-08-27 15:49:15,655 INFO sqlalchemy.engine.Engine 
+            UPDATE waiye_samples SET
+                area_acknowledged = $1,
+                rights_correct = $2,
+                bound_correct = $3,
+                member_qualified = $4,
+                self_verified = $5,
+                self_signed = $6,
+                satisfaction = $7,
+                survey_method = $8,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $9
+        
+2026-08-27 15:49:15,656 INFO sqlalchemy.engine.Engine [cached since 0.01842s ago] ('', '', '', '', '', '', 'ÂúÒâ', 'ÏÖ³¡', 291)
+2026-08-27 15:49:15,658 INFO sqlalchemy.engine.Engine 
+            UPDATE waiye_samples SET
+                area_acknowledged = $1,
+                rights_correct = $2,
+                bound_correct = $3,
+                member_qualified = $4,
+                self_verified = $5,
+                self_signed = $6,
+                satisfaction = $7,
+                survey_method = $8,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $9
+        
+2026-08-27 15:49:15,658 INFO sqlalchemy.engine.Engine [cached since 0.02081s ago] ('', '', '', '', '', '', 'ÂúÒâ', 'ÏÖ³¡', 292)
+2026-08-27 15:49:15,660 INFO sqlalchemy.engine.Engine 
+            UPDATE waiye_samples SET
+                area_acknowledged = $1,
+                rights_correct = $2,
+                bound_correct = $3,
+                member_qualified = $4,
+                self_verified = $5,
+                self_signed = $6,
+                satisfaction = $7,
+                survey_method = $8,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $9
+        
+2026-08-27 15:49:15,660 INFO sqlalchemy.engine.Engine [cached since 0.02273s ago] ('', '', '', '', '', '', 'ÂúÒâ', 'ÏÖ³¡', 293)
+2026-08-27 15:49:15,661 INFO sqlalchemy.engine.Engine 
+            UPDATE waiye_samples SET
+                area_acknowledged = $1,
+                rights_correct = $2,
+                bound_correct = $3,
+                member_qualified = $4,
+                self_verified = $5,
+                self_signed = $6,
+                satisfaction = $7,
+                survey_method = $8,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $9
+        
+2026-08-27 15:49:15,662 INFO sqlalchemy.engine.Engine [cached since 0.02425s ago] ('', '', '', '', '', '', 'ÂúÒâ', 'ÏÖ³¡', 294)
+2026-08-27 15:49:15,663 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50171 - "POST /api/waiye/save_records HTTP/1.1" 200 OK
+2026-08-27 15:49:15,996 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:49:15,996 INFO sqlalchemy.engine.Engine 
+            SELECT township_name, village_name, group_name, group_code,
+                   COUNT(*) as parcel_count,
+                   COUNT(DISTINCT cbfbm) as farmer_count,
+                   SUM(CASE WHEN area_acknowledged = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN rights_correct = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN bound_correct = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN member_qualified = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN self_verified = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN self_signed = 'X' THEN 1 ELSE 0 END) as error_count,
+                   SUM(CASE WHEN satisfaction = 'ÂúÒâ' THEN 1 ELSE 0 END) as sat_count
+            FROM waiye_samples
+            GROUP BY township_name, village_name, group_name, group_code
+            ORDER BY township_name, village_name, group_name
+        
+2026-08-27 15:49:15,997 INFO sqlalchemy.engine.Engine [cached since 19.54s ago] ()
+2026-08-27 15:49:16,000 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50176 - "GET /api/waiye/townships_summary HTTP/1.1" 200 OK
+2026-08-27 15:49:21,390 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:49:21,390 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 15:49:21,391 INFO sqlalchemy.engine.Engine [cached since 162s ago] ()
+2026-08-27 15:49:21,398 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50192 - "GET /api/hierarchy HTTP/1.1" 200 OK
+2026-08-27 15:49:28,719 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:49:28,719 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 15:49:28,720 INFO sqlalchemy.engine.Engine [generated in 0.00040s] ('341124',)
+2026-08-27 15:49:28,723 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50219 - "GET /api/get_neiye?qsdwdm=341124 HTTP/1.1" 200 OK
+2026-08-27 15:49:35,154 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:49:35,155 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 15:49:35,155 INFO sqlalchemy.engine.Engine [cached since 6.436s ago] ('341124100',)
+2026-08-27 15:49:35,156 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50230 - "GET /api/get_neiye?qsdwdm=341124100 HTTP/1.1" 200 OK
+2026-08-27 15:50:00,425 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:50:00,426 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 15:50:00,426 INFO sqlalchemy.engine.Engine [cached since 31.71s ago] ('341124102',)
+2026-08-27 15:50:00,428 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50274 - "GET /api/get_neiye?qsdwdm=341124102 HTTP/1.1" 200 OK
+2026-08-27 15:50:12,395 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:50:12,396 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 15:50:12,397 INFO sqlalchemy.engine.Engine [generated in 0.00051s] ('341124102', '´óÊûÕò', 'township', '{"mech_1": ["\\u76f4\\u63a5\\u5957\\u7528\\u4e0a\\u7ea7\\u65b9\\u6848"], "mech_2": ["\\u7ecf\\u8d39\\u6ca1\\u6709\\u53bf\\u7ea7\\u515c\\u5e95"], "mec ... (266 characters truncated) ... ["\\u6253\\u4e71\\u91cd\\u5206"], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 62.0)
+2026-08-27 15:50:12,404 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50283 - "POST /api/save_neiye HTTP/1.1" 200 OK
+2026-08-27 15:50:21,091 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:50:21,091 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc, form_data FROM neiye_records
+2026-08-27 15:50:21,092 INFO sqlalchemy.engine.Engine [generated in 0.00043s] ()
+2026-08-27 15:50:21,093 INFO sqlalchemy.engine.Engine 
+        SELECT township_name, group_code, 
+               SUM(CASE WHEN area_acknowledged='X' THEN 1 ELSE 0 END +
+                   CASE WHEN rights_correct='X' THEN 1 ELSE 0 END +
+                   CASE WHEN bound_correct='X' THEN 1 ELSE 0 END +
+                   CASE WHEN member_qualified='X' THEN 1 ELSE 0 END +
+                   CASE WHEN self_verified='X' THEN 1 ELSE 0 END +
+                   CASE WHEN self_signed='X' THEN 1 ELSE 0 END) as errors,
+               SUM(CASE WHEN satisfaction='ÂúÒâ' THEN 1 ELSE 0 END) as sats,
+               COUNT(*) as total
+        FROM waiye_samples
+        GROUP BY township_name, group_code
+    
+2026-08-27 15:50:21,094 INFO sqlalchemy.engine.Engine [generated in 0.00051s] ()
+2026-08-27 15:50:21,096 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50297 - "GET /api/score/summary HTTP/1.1" 200 OK
+2026-08-27 15:50:30,792 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:50:30,793 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc, form_data FROM neiye_records
+2026-08-27 15:50:30,793 INFO sqlalchemy.engine.Engine [cached since 9.702s ago] ()
+2026-08-27 15:50:30,795 INFO sqlalchemy.engine.Engine 
+        SELECT township_name, group_code, 
+               SUM(CASE WHEN area_acknowledged='X' THEN 1 ELSE 0 END +
+                   CASE WHEN rights_correct='X' THEN 1 ELSE 0 END +
+                   CASE WHEN bound_correct='X' THEN 1 ELSE 0 END +
+                   CASE WHEN member_qualified='X' THEN 1 ELSE 0 END +
+                   CASE WHEN self_verified='X' THEN 1 ELSE 0 END +
+                   CASE WHEN self_signed='X' THEN 1 ELSE 0 END) as errors,
+               SUM(CASE WHEN satisfaction='ÂúÒâ' THEN 1 ELSE 0 END) as sats,
+               COUNT(*) as total
+        FROM waiye_samples
+        GROUP BY township_name, group_code
+    
+2026-08-27 15:50:30,796 INFO sqlalchemy.engine.Engine [cached since 9.702s ago] ()
+2026-08-27 15:50:30,797 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50310 - "GET /api/export_att10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50322 - "GET /api/download?file=downloads/%E9%99%84%E4%BB%B610_%E5%85%A8%E6%A4%92%E5%8E%BF%E5%8E%BF%E7%BA%A7%E8%87%AA%E6%9F%A5%E5%BE%97%E5%88%86%E6%B1%87%E6%80%BB%E8%A1%A8.doc HTTP/1.1" 200 OK
+2026-08-27 15:50:51,069 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:50:51,069 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 15:50:51,070 INFO sqlalchemy.engine.Engine [cached since 251.7s ago] ()
+2026-08-27 15:50:51,078 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50354 - "GET /api/hierarchy HTTP/1.1" 200 OK
+2026-08-27 15:50:57,260 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:50:57,261 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 15:50:57,261 INFO sqlalchemy.engine.Engine [cached since 88.54s ago] ('341124105',)
+2026-08-27 15:50:57,263 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50365 - "GET /api/get_neiye?qsdwdm=341124105 HTTP/1.1" 200 OK
+2026-08-27 15:51:04,448 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:51:04,449 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 15:51:04,450 INFO sqlalchemy.engine.Engine [cached since 52.05s ago] ('341124105', 'Âí³§Õò', 'township', '{"mech_1": ["\\u76f4\\u63a5\\u5957\\u7528\\u4e0a\\u7ea7\\u65b9\\u6848"], "mech_2": [], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u57f9\\u8bad\\u6750\ ... (90 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 67.5)
+2026-08-27 15:51:04,453 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50373 - "POST /api/save_neiye HTTP/1.1" 200 OK
+2026-08-27 15:51:06,956 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:51:06,957 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 15:51:06,957 INFO sqlalchemy.engine.Engine [cached since 54.56s ago] ('341124105', 'Âí³§Õò', 'township', '{"mech_1": ["\\u76f4\\u63a5\\u5957\\u7528\\u4e0a\\u7ea7\\u65b9\\u6848"], "mech_2": [], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u57f9\\u8bad\\u6750\ ... (90 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 67.5)
+2026-08-27 15:51:06,958 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50378 - "POST /api/save_neiye HTTP/1.1" 200 OK
+2026-08-27 15:51:08,128 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:51:08,129 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 15:51:08,129 INFO sqlalchemy.engine.Engine [cached since 55.73s ago] ('341124105', 'Âí³§Õò', 'township', '{"mech_1": ["\\u76f4\\u63a5\\u5957\\u7528\\u4e0a\\u7ea7\\u65b9\\u6848"], "mech_2": [], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u57f9\\u8bad\\u6750\ ... (90 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 67.5)
+2026-08-27 15:51:08,131 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50383 - "POST /api/save_neiye HTTP/1.1" 200 OK
+2026-08-27 15:51:16,958 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:51:16,959 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 15:51:16,959 INFO sqlalchemy.engine.Engine [cached since 277.5s ago] ()
+2026-08-27 15:51:16,964 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50402 - "GET /api/hierarchy HTTP/1.1" 200 OK
+2026-08-27 15:51:35,301 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:51:35,302 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 15:51:35,302 INFO sqlalchemy.engine.Engine [cached since 295.9s ago] ()
+2026-08-27 15:51:35,311 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50422 - "GET /api/hierarchy HTTP/1.1" 200 OK
+2026-08-27 15:51:46,381 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:51:46,382 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 15:51:46,382 INFO sqlalchemy.engine.Engine [cached since 137.7s ago] ('341124105',)
+2026-08-27 15:51:46,383 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50435 - "GET /api/get_neiye?qsdwdm=341124105 HTTP/1.1" 200 OK
+2026-08-27 15:51:47,546 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:51:47,547 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 15:51:47,547 INFO sqlalchemy.engine.Engine [cached since 95.15s ago] ('341124105', 'Âí³§Õò', 'township', '{"mech_1": ["\\u76f4\\u63a5\\u5957\\u7528\\u4e0a\\u7ea7\\u65b9\\u6848"], "mech_2": [], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u57f9\\u8bad\\u6750\ ... (90 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 67.5)
+2026-08-27 15:51:47,550 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50438 - "POST /api/save_neiye HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50443 - "POST /api/export_neiye_att6 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50447 - "GET /api/download?file=downloads/%E9%99%84%E4%BB%B66_%E5%85%A8%E6%A4%92%E5%8E%BF%E5%8E%BF%E7%BA%A7%E8%87%AA%E6%9F%A5%E5%86%85%E4%B8%9A%E7%BB%84%E6%A3%80%E6%9F%A5%E8%AE%B0%E5%BD%95%E8%A1%A8_%E9%A9%AC%E5%8E%82%E9%95%87.doc HTTP/1.1" 200 OK
+2026-08-27 15:53:13,094 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:53:13,095 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 15:53:13,095 INFO sqlalchemy.engine.Engine [cached since 224.4s ago] ('341124',)
+2026-08-27 15:53:13,096 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50546 - "GET /api/get_neiye?qsdwdm=341124 HTTP/1.1" 200 OK
+2026-08-27 15:53:18,680 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:53:18,680 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 15:53:18,681 INFO sqlalchemy.engine.Engine [cached since 186.3s ago] ('341124', 'È«½·ÏØ (ÏØ¼¶)', 'county', '{"mech_1": ["\\u672a\\u5236\\u5b9a\\u65b9\\u6848"], "mech_2": ["\\u652f\\u4ed8\\u4e0d\\u53ca\\u65f6"], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u520 ... (113 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 8.5)
+2026-08-27 15:53:18,682 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50551 - "POST /api/save_neiye HTTP/1.1" 200 OK
+2026-08-27 15:54:46,742 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:54:46,743 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 15:54:46,743 INFO sqlalchemy.engine.Engine [cached since 318s ago] ('341124',)
+2026-08-27 15:54:46,744 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50635 - "GET /api/get_neiye?qsdwdm=341124 HTTP/1.1" 200 OK
+2026-08-27 15:54:50,321 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:54:50,321 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 15:54:50,322 INFO sqlalchemy.engine.Engine [cached since 277.9s ago] ('341124', 'È«½·ÏØ (ÏØ¼¶)', 'county', '{"mech_1": ["\\u672a\\u5236\\u5b9a\\u65b9\\u6848"], "mech_2": ["\\u652f\\u4ed8\\u4e0d\\u53ca\\u65f6"], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u520 ... (113 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 8.5)
+2026-08-27 15:54:50,323 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50641 - "POST /api/save_neiye HTTP/1.1" 200 OK
+2026-08-27 15:54:52,310 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:54:52,311 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 15:54:52,312 INFO sqlalchemy.engine.Engine [cached since 279.9s ago] ('341124', 'È«½·ÏØ (ÏØ¼¶)', 'county', '{"mech_1": ["\\u672a\\u5236\\u5b9a\\u65b9\\u6848"], "mech_2": ["\\u652f\\u4ed8\\u4e0d\\u53ca\\u65f6"], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u520 ... (113 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 8.5)
+2026-08-27 15:54:52,313 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50649 - "POST /api/save_neiye HTTP/1.1" 200 OK
+2026-08-27 15:54:52,638 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:54:52,638 INFO sqlalchemy.engine.Engine SELECT qsdwdm, form_data, score FROM neiye_records
+2026-08-27 15:54:52,639 INFO sqlalchemy.engine.Engine [generated in 0.00045s] ()
+2026-08-27 15:54:52,640 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50653 - "GET /api/export_neiye_att7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50670 - "GET /api/download?file=downloads/%E9%99%84%E4%BB%B67_%E5%85%A8%E6%A4%92%E5%8E%BF%E5%8E%BF%E7%BA%A7%E8%87%AA%E6%9F%A5%E5%86%85%E4%B8%9A%E7%BB%84%E6%A3%80%E6%9F%A5%E5%BE%97%E5%88%86%E8%A1%A8.doc HTTP/1.1" 200 OK
+2026-08-27 15:55:57,084 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:55:57,085 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 15:55:57,085 INFO sqlalchemy.engine.Engine [cached since 557.7s ago] ()
+2026-08-27 15:55:57,093 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50814 - "GET /api/hierarchy HTTP/1.1" 200 OK
+2026-08-27 15:56:00,858 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:56:00,858 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 15:56:00,859 INFO sqlalchemy.engine.Engine [cached since 392.1s ago] ('341124',)
+2026-08-27 15:56:00,860 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50829 - "GET /api/get_neiye?qsdwdm=341124 HTTP/1.1" 200 OK
+2026-08-27 15:56:02,632 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:56:02,633 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 15:56:02,633 INFO sqlalchemy.engine.Engine [cached since 350.2s ago] ('341124', 'È«½·ÏØ (ÏØ¼¶)', 'county', '{"mech_1": ["\\u672a\\u5236\\u5b9a\\u65b9\\u6848"], "mech_2": ["\\u652f\\u4ed8\\u4e0d\\u53ca\\u65f6"], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u520 ... (113 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 8.5)
+2026-08-27 15:56:02,635 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50831 - "POST /api/save_neiye HTTP/1.1" 200 OK
+2026-08-27 15:56:21,705 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:56:21,705 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 15:56:21,706 INFO sqlalchemy.engine.Engine [cached since 582.3s ago] ()
+2026-08-27 15:56:21,713 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50839 - "GET /api/hierarchy HTTP/1.1" 200 OK
+2026-08-27 15:56:25,216 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:56:25,217 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 15:56:25,218 INFO sqlalchemy.engine.Engine [cached since 416.5s ago] ('341124100',)
+2026-08-27 15:56:25,219 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:50843 - "GET /api/get_neiye?qsdwdm=341124100 HTTP/1.1" 200 OK
+2026-08-27 15:56:26,898 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 15:56:26,899 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 15:56:26,900 INFO sqlalchemy.engine.Engine [cached since 374.5s ago] ('341124100', 'ÏåºÓÕò', 'township', '{"mech_1": ["\\u672a\\u5236\\u5b9a\\u65b9\\u6848"], "mech_2": ["\\u652f\\u4ed8\\u4e0d\\u53ca\\u65f6"], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u520 ... (113 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 63.5)
+2026-08-27 15:56:26,901 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:50847 - "POST /api/save_neiye HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50851 - "POST /api/export_neiye_att6 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50874 - "GET /api/download?file=downloads/%E9%99%84%E4%BB%B66_%E5%85%A8%E6%A4%92%E5%8E%BF%E5%8E%BF%E7%BA%A7%E8%87%AA%E6%9F%A5%E5%86%85%E4%B8%9A%E7%BB%84%E6%A3%80%E6%9F%A5%E8%AE%B0%E5%BD%95%E8%A1%A8_%E8%A5%84%E6%B2%B3%E9%95%87.doc HTTP/1.1" 200 OK
+2026-08-27 16:04:15,186 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 16:04:15,187 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 16:04:15,187 INFO sqlalchemy.engine.Engine [cached since 1056s ago] ()
+2026-08-27 16:04:15,193 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:51498 - "GET /api/hierarchy HTTP/1.1" 200 OK
+2026-08-27 16:04:18,607 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 16:04:18,608 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 16:04:18,608 INFO sqlalchemy.engine.Engine [cached since 889.9s ago] ('341124',)
+2026-08-27 16:04:18,610 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:51508 - "GET /api/get_neiye?qsdwdm=341124 HTTP/1.1" 200 OK
+2026-08-27 16:04:20,804 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 16:04:20,805 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 16:04:20,805 INFO sqlalchemy.engine.Engine [cached since 848.4s ago] ('341124', 'È«½·ÏØ (ÏØ¼¶)', 'county', '{"mech_1": ["\\u672a\\u5236\\u5b9a\\u65b9\\u6848"], "mech_2": ["\\u652f\\u4ed8\\u4e0d\\u53ca\\u65f6"], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u520 ... (113 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 8.5)
+2026-08-27 16:04:20,806 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:51513 - "POST /api/save_neiye HTTP/1.1" 200 OK
+2026-08-27 16:04:33,424 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 16:04:33,425 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 16:04:33,426 INFO sqlalchemy.engine.Engine [cached since 1074s ago] ()
+2026-08-27 16:04:33,431 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:51552 - "GET /api/hierarchy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51517 - "POST /api/export_neiye_att6 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51565 - "GET /api/download?file=downloads/%E9%99%84%E4%BB%B66_%E5%85%A8%E6%A4%92%E5%8E%BF%E5%8E%BF%E7%BA%A7%E8%87%AA%E6%9F%A5%E5%86%85%E4%B8%9A%E7%BB%84%E6%A3%80%E6%9F%A5%E8%AE%B0%E5%BD%95%E8%A1%A8%EF%BC%881_4%EF%BC%89.doc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50556 - "POST /api/export_neiye_att6 HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:50833 - "POST /api/export_neiye_att6 HTTP/1.1" 500 Internal Server Error
+2026-08-27 16:06:56,662 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 16:06:56,663 INFO sqlalchemy.engine.Engine SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm
+2026-08-27 16:06:56,664 INFO sqlalchemy.engine.Engine [cached since 1217s ago] ()
+2026-08-27 16:06:56,672 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:52067 - "GET /api/hierarchy HTTP/1.1" 200 OK
+2026-08-27 16:07:01,328 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 16:07:01,329 INFO sqlalchemy.engine.Engine SELECT form_data, score FROM neiye_records WHERE qsdwdm = $1
+2026-08-27 16:07:01,329 INFO sqlalchemy.engine.Engine [cached since 1053s ago] ('341124',)
+2026-08-27 16:07:01,330 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:52078 - "GET /api/get_neiye?qsdwdm=341124 HTTP/1.1" 200 OK
+2026-08-27 16:07:03,509 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-27 16:07:03,509 INFO sqlalchemy.engine.Engine 
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                qsdwmc = EXCLUDED.qsdwmc,
+                level = EXCLUDED.level,
+                form_data = EXCLUDED.form_data,
+                score = EXCLUDED.score,
+                updated_at = CURRENT_TIMESTAMP
+        
+2026-08-27 16:07:03,510 INFO sqlalchemy.engine.Engine [cached since 1011s ago] ('341124', 'È«½·ÏØ (ÏØ¼¶)', 'county', '{"mech_1": ["\\u672a\\u5236\\u5b9a\\u65b9\\u6848"], "mech_2": ["\\u652f\\u4ed8\\u4e0d\\u53ca\\u65f6"], "mech_3": [], "mech_4": ["\\u6ca1\\u6709\\u520 ... (113 characters truncated) ... [], "prog_7": [], "policy_1": [], "policy_2_1": 0, "policy_2_2": 0, "policy_3_1": 0, "policy_3_2": 0, "policy_4": [], "policy_5": [], "effect_1": []}', 8.5)
+2026-08-27 16:07:03,511 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     127.0.0.1:52089 - "POST /api/save_neiye HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52093 - "POST /api/export_neiye_att6 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52116 - "GET /api/download?file=downloads/%E9%99%84%E4%BB%B66_%E5%85%A8%E6%A4%92%E5%8E%BF%E5%8E%BF%E7%BA%A7%E8%87%AA%E6%9F%A5%E5%86%85%E4%B8%9A%E7%BB%84%E6%A3%80%E6%9F%A5%E8%AE%B0%E5%BD%95%E8%A1%A8%EF%BC%881_4%EF%BC%89.doc HTTP/1.1" 200 OK
+export_neiye_att6_county error: (-2147023170, 'è¿œç¨‹è¿‡ç¨‹è°ƒç”¨å¤±è´¥ã€‚', None, None)
+export_neiye_att6_county error: (-2147023170, 'è¿œç¨‹è¿‡ç¨‹è°ƒç”¨å¤±è´¥ã€‚', None, None)
+INFO:     127.0.0.1:53283 - "POST /api/export_neiye_att6 HTTP/1.1" 200 OK
