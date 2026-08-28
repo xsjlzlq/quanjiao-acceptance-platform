@@ -583,7 +583,7 @@ async def get_waiye_group_samples(
                 SELECT id, township_name, village_name, group_name, group_code,
                        cbfmc, cbfbm, cbfbm_short, lxdh, dkmc, dkbm, dkbm_short, scmj,
                        area_acknowledged, rights_correct, bound_correct, member_qualified,
-                       self_verified, self_signed, satisfaction, survey_method, signature_url
+                       self_verified, self_signed, satisfaction, survey_method, signature_url, phone_correct
                 FROM waiye_samples
                 WHERE group_code = :gc
                 ORDER BY id
@@ -594,7 +594,7 @@ async def get_waiye_group_samples(
                 SELECT id, township_name, village_name, group_name, group_code,
                        cbfmc, cbfbm, cbfbm_short, lxdh, dkmc, dkbm, dkbm_short, scmj,
                        area_acknowledged, rights_correct, bound_correct, member_qualified,
-                       self_verified, self_signed, satisfaction, survey_method, signature_url
+                       self_verified, self_signed, satisfaction, survey_method, signature_url, phone_correct
                 FROM waiye_samples
                 WHERE township_name = :tn AND village_name = :vn AND group_name = :gn
                 ORDER BY id
@@ -637,7 +637,8 @@ async def get_waiye_group_samples(
                 "self_signed": r[18] or "",
                 "satisfaction": r[19] or "满意",
                 "survey_method": r[20] or "现场",
-                "signature_url": sig_url
+                "signature_url": sig_url,
+                "phone_correct": r[22] or ""
             })
             
         return {"code": 200, "data": data}
@@ -716,6 +717,7 @@ class WaiyeRecordItem(BaseModel):
     self_signed: Optional[str] = ""
     satisfaction: Optional[str] = "满意"
     survey_method: Optional[str] = "现场"
+    phone_correct: Optional[str] = ""
 
 class WaiyeSaveRequest(BaseModel):
     records: List[WaiyeRecordItem]
@@ -733,6 +735,7 @@ async def save_waiye_records(req: WaiyeSaveRequest):
                 self_signed = :self_sig,
                 satisfaction = :sat,
                 survey_method = :sm,
+                phone_correct = :phone_cor,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = :id
         """)
@@ -746,7 +749,8 @@ async def save_waiye_records(req: WaiyeSaveRequest):
                 "self_ver": item.self_verified or "",
                 "self_sig": item.self_signed or "",
                 "sat": item.satisfaction or "满意",
-                "sm": item.survey_method or "现场"
+                "sm": item.survey_method or "现场",
+                "phone_cor": item.phone_correct or ""
             })
         await session.commit()
         return {"code": 200, "message": "保存成功"}
@@ -765,7 +769,7 @@ async def api_export_waiye_att8(req: ExportWaiyeAtt8Request):
                 SELECT id, township_name, village_name, group_name,
                        cbfmc, cbfbm, cbfbm_short, lxdh, dkmc, dkbm_short, scmj,
                        area_acknowledged, rights_correct, bound_correct, member_qualified,
-                       self_verified, self_signed, satisfaction, survey_method, signature_url
+                       self_verified, self_signed, satisfaction, survey_method, signature_url, phone_correct
                 FROM waiye_samples
                 WHERE group_code = :gc
                 ORDER BY cbfbm, id
@@ -776,7 +780,7 @@ async def api_export_waiye_att8(req: ExportWaiyeAtt8Request):
                 SELECT id, township_name, village_name, group_name,
                        cbfmc, cbfbm, cbfbm_short, lxdh, dkmc, dkbm_short, scmj,
                        area_acknowledged, rights_correct, bound_correct, member_qualified,
-                       self_verified, self_signed, satisfaction, survey_method, signature_url
+                       self_verified, self_signed, satisfaction, survey_method, signature_url, phone_correct
                 FROM waiye_samples
                 WHERE township_name = :tn AND village_name = :vn AND group_name = :gn
                 ORDER BY cbfbm, id
@@ -787,7 +791,7 @@ async def api_export_waiye_att8(req: ExportWaiyeAtt8Request):
                 SELECT id, township_name, village_name, group_name,
                        cbfmc, cbfbm, cbfbm_short, lxdh, dkmc, dkbm_short, scmj,
                        area_acknowledged, rights_correct, bound_correct, member_qualified,
-                       self_verified, self_signed, satisfaction, survey_method, signature_url
+                       self_verified, self_signed, satisfaction, survey_method, signature_url, phone_correct
                 FROM waiye_samples
                 WHERE township_name = :tn
                 ORDER BY village_name, group_name, cbfbm, id

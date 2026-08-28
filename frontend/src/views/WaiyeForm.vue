@@ -86,23 +86,25 @@
             class="parcel-card"
           >
             <!-- ================== 承包方层级信息 ================== -->
-            <div class="parcel-header" style="background: #eef5fe; padding: 12px 14px; border-bottom: 1px solid #ebedf0;">
-              <div class="farmer-info">
+            <div class="parcel-header" style="background: #eef5fe; padding: 12px 14px; border-bottom: 1px solid #ebedf0; display: block;">
+              <div class="farmer-info" style="margin-bottom: 6px;">
                 <span class="index-badge" style="background: #1989fa;">{{ index + 1 }}</span>
                 <span class="farmer-name" style="font-size: 16px;">{{ grp.cbfmc }}</span>
                 <span class="code-tag">编码: {{ grp.cbfbm_short }}</span>
-                <van-button size="mini" type="primary" plain round style="margin-left:6px; padding: 0 6px;" @click="showMembers(grp.parcels[0])">成员详情</van-button>
+                <van-button size="mini" type="primary" plain round style="margin-left:auto; padding: 0 10px;" @click="showMembers(grp.parcels[0])">成员详情</van-button>
               </div>
-              <a
-                v-if="grp.lxdh"
-                :href="'tel:' + cleanPhone(grp.lxdh)"
-                class="phone-call-btn"
-                title="点击直接拨打电话"
-                @click.stop="handlePhoneClick(grp.lxdh)"
-              >
-                <van-icon name="phone" color="#1989fa" />
-                <span>{{ grp.lxdh }}</span>
-              </a>
+              <div v-if="grp.lxdh" style="margin-top: 2px;">
+                <a
+                  :href="'tel:' + cleanPhone(grp.lxdh)"
+                  class="phone-call-btn"
+                  title="点击直接拨打电话"
+                  @click.stop="handlePhoneClick(grp.lxdh)"
+                  style="display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: #1989fa; text-decoration: none; padding: 4px 8px; background: rgba(25,137,250,0.08); border-radius: 4px;"
+                >
+                  <van-icon name="phone" color="#1989fa" size="16" />
+                  <span>{{ grp.lxdh }}</span>
+                </a>
+              </div>
             </div>
 
             <div class="parcel-details" style="background: #fafcff;">
@@ -146,6 +148,16 @@
                   @click="toggleContractorError(grp, 'self_signed')"
                 >
                   {{ grp.parcels[0].self_signed === 'X' ? '✗ 非本人签名(X)' : '是否本人签名确认' }}
+                </van-button>
+                <van-button 
+                  size="mini" 
+                  :type="grp.parcels[0].phone_correct === 'X' ? 'danger' : 'default'"
+                  :plain="grp.parcels[0].phone_correct !== 'X'"
+                  round
+                  class="check-btn"
+                  @click="toggleContractorError(grp, 'phone_correct')"
+                >
+                  {{ grp.parcels[0].phone_correct === 'X' ? '✗ 联系电话(X)' : '联系电话是否正确' }}
                 </van-button>
               </div>
             </div>
@@ -571,7 +583,8 @@ const silentAutoSave = async () => {
         self_verified: item.self_verified,
         self_signed: item.self_signed,
         satisfaction: item.satisfaction,
-        survey_method: item.survey_method
+        survey_method: item.survey_method,
+        phone_correct: item.phone_correct
       }))
     };
     const res = await axios.post('/api/waiye/save_records', payload);
@@ -886,13 +899,17 @@ const toggleError = async (item, field) => {
 
 const totalErrorCount = computed(() => {
   let count = 0;
-  for (const item of groupSamples.value) {
-    if (item.area_acknowledged === 'X') count++;
-    if (item.rights_correct === 'X') count++;
-    if (item.bound_correct === 'X') count++;
-    if (item.member_qualified === 'X') count++;
-    if (item.self_verified === 'X') count++;
-    if (item.self_signed === 'X') count++;
+  for (const grp of groupedSamples.value) {
+    const first = grp.parcels[0];
+    if (first.rights_correct === 'X') count++;
+    if (first.member_qualified === 'X') count++;
+    if (first.self_signed === 'X') count++;
+    if (first.phone_correct === 'X') count++;
+    for (const p of grp.parcels) {
+      if (p.area_acknowledged === 'X') count++;
+      if (p.bound_correct === 'X') count++;
+      if (p.self_verified === 'X') count++;
+    }
   }
   return count;
 });
@@ -903,9 +920,9 @@ const progScore = computed(() => {
 });
 
 const effectScore = computed(() => {
-  if (groupSamples.value.length === 0) return '10.0';
-  const satisfiedCount = groupSamples.value.filter(x => x.satisfaction === '满意').length;
-  const score = (satisfiedCount / groupSamples.value.length) * 10.0;
+  if (groupedSamples.value.length === 0) return '10.0';
+  const satisfiedCount = groupedSamples.value.filter(grp => grp.parcels[0].satisfaction === '满意').length;
+  const score = (satisfiedCount / groupedSamples.value.length) * 10.0;
   return score.toFixed(1);
 });
 
@@ -922,7 +939,8 @@ const saveAllSilent = async () => {
         self_verified: item.self_verified,
         self_signed: item.self_signed,
         satisfaction: item.satisfaction,
-        survey_method: item.survey_method
+        survey_method: item.survey_method,
+        phone_correct: item.phone_correct
       }))
     };
     await axios.post('/api/waiye/save_records', payload);
@@ -948,7 +966,8 @@ const saveAll = async () => {
         self_verified: item.self_verified,
         self_signed: item.self_signed,
         satisfaction: item.satisfaction,
-        survey_method: item.survey_method
+        survey_method: item.survey_method,
+        phone_correct: item.phone_correct
       }))
     };
     const res = await axios.post('/api/waiye/save_records', payload);
@@ -991,7 +1010,8 @@ const exportCurrentGroupAtt8 = async () => {
         self_verified: item.self_verified,
         self_signed: item.self_signed,
         satisfaction: item.satisfaction,
-        survey_method: item.survey_method
+        survey_method: item.survey_method,
+        phone_correct: item.phone_correct
       }))
     });
 

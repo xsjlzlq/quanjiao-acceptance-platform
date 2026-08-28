@@ -711,20 +711,28 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
             t8.Cell(r_idx, 3).Range.Text = str(r.get('cbfbm_short', '') or r.get('承包方编码(缩略码)', ''))
             
             lxdh_val = str(r.get('lxdh', '') or r.get('联系电话', ''))
+            cell_dh = t8.Cell(r_idx, 4)
             if r.get('phone_correct') == 'X':
-                t8.Cell(r_idx, 4).Range.Text = lxdh_val + " (X)" if lxdh_val else "X"
+                cell_dh.Range.Text = lxdh_val + ' (X)' if lxdh_val else 'X'
+                rng_find = cell_dh.Range
+                rng_find.Find.ClearFormatting()
+                rng_find.Find.Text = 'X'
+                while rng_find.Find.Execute():
+                    rng_find.Font.Color = 255
             else:
-                t8.Cell(r_idx, 4).Range.Text = lxdh_val
+                cell_dh.Range.Text = lxdh_val
 
             t8.Cell(r_idx, 5).Range.Text = str(r.get('dkmc', '') or r.get('地块名称', ''))
             t8.Cell(r_idx, 6).Range.Text = str(r.get('dkbm_short', '') or r.get('地块简编码', ''))
             t8.Cell(r_idx, 7).Range.Text = str(r.get('scmj', '') or r.get('成果面积(亩)', ''))
-            t8.Cell(r_idx, 8).Range.Text = r.get('area_acknowledged', '')
-            t8.Cell(r_idx, 9).Range.Text = r.get('rights_correct', '')
-            t8.Cell(r_idx, 10).Range.Text = r.get('bound_correct', '')
-            t8.Cell(r_idx, 11).Range.Text = r.get('member_qualified', '')
-            t8.Cell(r_idx, 12).Range.Text = r.get('self_verified', '')
-            t8.Cell(r_idx, 13).Range.Text = r.get('self_signed', '')
+            for c_pos, k_name in [(8, 'area_acknowledged'), (9, 'rights_correct'), (10, 'bound_correct'), (11, 'member_qualified'), (12, 'self_verified'), (13, 'self_signed')]:
+                cell_k = t8.Cell(r_idx, c_pos)
+                val_k = r.get(k_name, '')
+                if val_k == 'X':
+                    cell_k.Range.Text = 'X'
+                    cell_k.Range.Font.Color = 255
+                else:
+                    cell_k.Range.Text = '√'
             t8.Cell(r_idx, 14).Range.Text = sat
             t8.Cell(r_idx, 15).Range.Text = r.get('survey_method', r.get('调查抽样方式', '现场'))
             t8.Cell(r_idx, 16).Range.Text = ""
@@ -739,7 +747,7 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
         t8.Cell(r_stat_idx, 3).Range.Text = str(satisfaction_count)
         
         r_score_idx = total_count + 3
-        t8.Cell(r_score_idx, 1).Range.Text = f"发包方程序规范得分=20-发包方错误总和({total_errors})×0.5={prog_score:.1f}；发包方工作成效（满意度调查）得分=满意数({satisfaction_count})/抽检数({total_count})×10={effect_score:.1f}"
+        t8.Cell(r_score_idx, 1).Range.Text = f"发包方程序规范得分=20-发包方错误总和({total_errors})×0.5={prog_score:.1f}；发包方工作成效（满意度调查）得分=满意数({satisfaction_count})/抽检数({contractor_count})×10={effect_score:.1f}"
 
         # Group contiguous rows by contractor (cbfbm) and merge Column 16 from bottom to top
         segments = []
@@ -765,8 +773,17 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
                         t8.Cell(r_start, col_idx).Merge(t8.Cell(r_end, col_idx))
                     else:
                         val = t8.Cell(r_start, col_idx).Range.Text.replace('\r', '').replace('\x07', '')
+                        is_red = (t8.Cell(r_start, col_idx).Range.Font.Color == 255)
                         t8.Cell(r_start, col_idx).Merge(t8.Cell(r_end, col_idx))
                         t8.Cell(r_start, col_idx).Range.Text = val
+                        if is_red:
+                            t8.Cell(r_start, col_idx).Range.Font.Color = 255
+                        if col_idx == 4 and 'X' in val:
+                            rng_find = t8.Cell(r_start, col_idx).Range
+                            rng_find.Find.ClearFormatting()
+                            rng_find.Find.Text = 'X'
+                            while rng_find.Find.Execute():
+                                rng_find.Font.Color = 255
                 cell_target = t8.Cell(r_start, 16)
             else:
                 cell_target = t8.Cell(r_start, 16)
@@ -832,15 +849,17 @@ def export_waiye_att9(samples_rows):
             total_errors = 0
             satisfaction_count = 0
             for r in g_rows:
-                for k in ["area_acknowledged", "rights_correct", "bound_correct", "member_qualified", "self_verified", "self_signed"]:
+                for k in ["area_acknowledged", "rights_correct", "bound_correct", "member_qualified", "self_verified", "self_signed", "phone_correct"]:
                     if r.get(k) == "X":
                         total_errors += 1
                 if r.get("satisfaction") == "满意":
                     satisfaction_count += 1
                     
+            contractor_ids = {r.get("cbfbm") or r.get("cbfbm_short") or r.get("cbfmc") for r in g_rows}
+            c_cnt = len(contractor_ids) if contractor_ids else len(g_rows)
             tot_cnt = len(g_rows)
             prog_score = max(20.0 - total_errors * 0.5, 0.0)
-            effect_score = (satisfaction_count / tot_cnt * 10.0) if tot_cnt > 0 else 10.0
+            effect_score = (satisfaction_count / c_cnt * 10.0) if c_cnt > 0 else 10.0
             
             item = {
                 "township": t_name,
