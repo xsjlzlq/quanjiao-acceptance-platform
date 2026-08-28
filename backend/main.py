@@ -1285,7 +1285,7 @@ async def api_delete_evidence(req: DeleteEvidenceRequest):
     try:
         if url.startswith("/uploads/"):
             filename = os.path.basename(url)
-            if ".." not in filename and "/" not in filename and "\" not in filename:
+            if ".." not in filename and "/" not in filename and "\\" not in filename:
                 filepath = os.path.join(os.path.dirname(__file__), "uploads", filename)
                 if os.path.exists(filepath) and os.path.isfile(filepath):
                     os.remove(filepath)
