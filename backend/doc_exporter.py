@@ -681,23 +681,41 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
         total_errors = 0
         satisfaction_count = 0
         
+        # Group by contractor to calculate unique contractor-level errors and satisfaction
+        processed_contractors = set()
+        contractor_count = 0
+
         for i, r in enumerate(group_rows):
             r_idx = i + 2
             farmer_name = r.get('cbfmc', '') or r.get('承包方代表', '')
+            cbfbm = str(r.get("cbfbm", "") or r.get("cbfbm_short", "") or r.get("cbfmc", ""))
             
-            check_keys = ['area_acknowledged', 'rights_correct', 'bound_correct', 'member_qualified', 'self_verified', 'self_signed']
-            for k in check_keys:
+            # Parcel-level errors
+            for k in ['area_acknowledged', 'bound_correct', 'self_verified']:
                 if r.get(k) == 'X':
                     total_errors += 1
             
+            # Contractor-level errors & satisfaction
             sat = r.get('satisfaction', '满意')
-            if sat == '满意':
-                satisfaction_count += 1
+            if cbfbm not in processed_contractors:
+                processed_contractors.add(cbfbm)
+                contractor_count += 1
+                for k in ['rights_correct', 'member_qualified', 'self_signed', 'phone_correct']:
+                    if r.get(k) == 'X':
+                        total_errors += 1
+                if sat == '满意':
+                    satisfaction_count += 1
                 
             t8.Cell(r_idx, 1).Range.Text = str(i + 1)
             t8.Cell(r_idx, 2).Range.Text = farmer_name
             t8.Cell(r_idx, 3).Range.Text = str(r.get('cbfbm_short', '') or r.get('承包方编码(缩略码)', ''))
-            t8.Cell(r_idx, 4).Range.Text = str(r.get('lxdh', '') or r.get('联系电话', ''))
+            
+            lxdh_val = str(r.get('lxdh', '') or r.get('联系电话', ''))
+            if r.get('phone_correct') == 'X':
+                t8.Cell(r_idx, 4).Range.Text = lxdh_val + " (X)" if lxdh_val else "X"
+            else:
+                t8.Cell(r_idx, 4).Range.Text = lxdh_val
+
             t8.Cell(r_idx, 5).Range.Text = str(r.get('dkmc', '') or r.get('地块名称', ''))
             t8.Cell(r_idx, 6).Range.Text = str(r.get('dkbm_short', '') or r.get('地块简编码', ''))
             t8.Cell(r_idx, 7).Range.Text = str(r.get('scmj', '') or r.get('成果面积(亩)', ''))
@@ -714,7 +732,7 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
         # Fill stats rows BEFORE any vertical merges
         total_count = len(group_rows)
         prog_score = max(20.0 - total_errors * 0.5, 0.0)
-        effect_score = (satisfaction_count / total_count * 10.0) if total_count > 0 else 10.0
+        effect_score = (satisfaction_count / contractor_count * 10.0) if contractor_count > 0 else 10.0
         
         r_stat_idx = total_count + 2
         t8.Cell(r_stat_idx, 2).Range.Text = str(total_errors)
@@ -742,10 +760,9 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
         
         for cbfbm, r_start, r_end in reversed(segments):
             if r_start < r_end:
-                cell_start = t8.Cell(r_start, 16)
-                cell_end = t8.Cell(r_end, 16)
-                cell_start.Merge(cell_end)
-                cell_target = cell_start
+                for col_idx in [16, 15, 14, 13, 11, 9, 4, 3, 2]:
+                    t8.Cell(r_start, col_idx).Merge(t8.Cell(r_end, col_idx))
+                cell_target = t8.Cell(r_start, 16)
             else:
                 cell_target = t8.Cell(r_start, 16)
                 
