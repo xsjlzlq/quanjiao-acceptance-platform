@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlalchemy
+asyncpg
+alembic
+pydantic
+python-dotenv
+pandas
+geopandas
+pyodbc
+xlrd
+openpyxl
+psycopg2

@@ -1,0 +1,172 @@
+﻿<template>
+  <div class="settings">
+    <van-nav-bar
+      title="系统设置"
+      left-text="返回"
+      left-arrow
+      @click-left="$router.back()"
+    />
+    
+    <van-tabs v-model:active="activeTab" sticky color="#1989fa">
+      <!-- ================= 标签页 1：自动保存 ================= -->
+      <van-tab title="自动保存">
+        <van-cell-group inset title="核查状态自动保存配置" style="margin-top: 16px;">
+          <van-cell center title="启用核查自动保存" label="开启后内业与外业核查将按设定间隔定时自动保存至数据库">
+            <template #right-icon>
+              <van-switch v-model="autoSaveEnabled" size="22" @change="onAutoSaveToggle" />
+            </template>
+          </van-cell>
+          
+          <van-field
+            v-if="autoSaveEnabled"
+            v-model="autoSaveInterval"
+            type="digit"
+            label="自动保存间隔"
+            placeholder="请输入分钟数 (默认5分钟)"
+          >
+            <template #extra>
+              <span>分钟 (默认5分钟)</span>
+            </template>
+          </van-field>
+
+          <div style="margin: 16px;">
+            <van-button round block type="primary" plain @click="saveAutoSaveConfig(true)">
+              保存自动保存设置
+            </van-button>
+          </div>
+
+          <div class="setting-tip">
+            <strong>功能说明：</strong><br/>
+            1. 开启后，进入「内业核查」或「外业核查」页面时，系统将在后台自动定时保存最新评分与打X核查状态到数据库。<br/>
+            2. 默认时间间隔为 <strong>5 分钟</strong>，可根据实际网络环境与作业习惯自行调整。<br/>
+            3. 关闭后，核查页面顶部将提示手动保存，不再执行定时后台保存。
+          </div>
+        </van-cell-group>
+      </van-tab>
+
+      <!-- ================= 标签页 2：数据入库 ================= -->
+      <van-tab title="数据入库">
+        <van-cell-group inset title="全量数据包入库" style="margin-top: 16px;">
+          <van-field
+            v-model="sourcePath"
+            label="数据包路径"
+            placeholder="例如: G:\全椒县二轮延包\全椒县县级验收管理平台\sources\341124100"
+            required
+          />
+          
+          <div style="margin: 16px;">
+            <van-button round block type="primary" :loading="loading" loading-text="导入中..." @click="startImport">
+              开始导入入库
+            </van-button>
+          </div>
+
+          <div class="setting-tip">
+            <strong>入库说明：</strong><br/>
+            支持从指定目录读取权属代码表、地块矢量、承包方等核心业务数据包并写入系统 PostgreSQL 数据库。
+          </div>
+        </van-cell-group>
+        
+        <van-cell-group inset title="执行日志" v-if="logs.length > 0" style="margin-top: 16px;">
+          <van-cell v-for="(log, idx) in logs" :key="idx" :title="log" />
+        </van-cell-group>
+      </van-tab>
+    </van-tabs>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue';
+import { showToast, showDialog } from 'vant';
+import axios from 'axios';
+
+const activeTab = ref(0);
+
+const AUTO_SAVE_KEY = 'auto_save_settings';
+
+const autoSaveEnabled = ref(true);
+const autoSaveInterval = ref('5');
+
+const sourcePath = ref('G:\\全椒县二轮延包\\全椒县县级验收管理平台\\sources\\341124100');
+const loading = ref(false);
+const logs = ref([]);
+
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem(AUTO_SAVE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      autoSaveEnabled.value = parsed.enabled !== false;
+      autoSaveInterval.value = String(parsed.interval || 5);
+    } else {
+      autoSaveEnabled.value = true;
+      autoSaveInterval.value = '5';
+    }
+  } catch (e) {
+    autoSaveEnabled.value = true;
+    autoSaveInterval.value = '5';
+  }
+});
+
+const onAutoSaveToggle = () => {
+  saveAutoSaveConfig(false);
+};
+
+const saveAutoSaveConfig = (showMsg = true) => {
+  let interval = parseInt(autoSaveInterval.value);
+  if (isNaN(interval) || interval <= 0) {
+    interval = 5;
+    autoSaveInterval.value = '5';
+  }
+  const config = {
+    enabled: autoSaveEnabled.value,
+    interval: interval
+  };
+  localStorage.setItem(AUTO_SAVE_KEY, JSON.stringify(config));
+  if (showMsg) {
+    if (autoSaveEnabled.value) {
+      showToast({ type: 'success', message: `设置已保存：每 ${interval} 分钟自动保存一次` });
+    } else {
+      showToast({ message: '已关闭自动保存' });
+    }
+  }
+};
+
+const startImport = async () => {
+  if (!sourcePath.value) {
+    showToast('请输入数据包路径');
+    return;
+  }
+  loading.value = true;
+  logs.value = ['请求已发送，后端正在处理大数据入库，请耐心等待...'];
+  try {
+    const res = await axios.post('/api/import-data', { source_path: sourcePath.value });
+    if (res.data.code === 200) {
+      logs.value = res.data.details || ['导入成功'];
+      showToast('数据包入库成功');
+    } else {
+      logs.value = [res.data.message];
+      showDialog({ title: '入库失败', message: res.data.message });
+    }
+  } catch (err) {
+    logs.value = ['请求异常: ' + err.message];
+    showToast('网络或服务异常');
+  } finally {
+    loading.value = false;
+  }
+};
+</script>
+
+<style scoped>
+.settings {
+  min-height: 100vh;
+  background-color: #f7f8fa;
+  padding-bottom: 40px;
+}
+
+.setting-tip {
+  padding: 0 16px 14px 16px;
+  font-size: 12px;
+  color: #969799;
+  line-height: 1.6;
+}
+</style>
