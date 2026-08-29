@@ -695,14 +695,21 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
                 if r.get(k) == 'X':
                     total_errors += 1
             
+            lxdh_val = str(r.get('lxdh', '') or r.get('联系电话', '') or '').strip()
+            if lxdh_val == 'None':
+                lxdh_val = ''
+            is_phone_err = (r.get('phone_correct') == 'X') or (not lxdh_val)
+
             # Contractor-level errors & satisfaction
             sat = r.get('satisfaction', '满意')
             if cbfbm not in processed_contractors:
                 processed_contractors.add(cbfbm)
                 contractor_count += 1
-                for k in ['rights_correct', 'member_qualified', 'self_signed', 'phone_correct']:
+                for k in ['rights_correct', 'member_qualified', 'self_signed']:
                     if r.get(k) == 'X':
                         total_errors += 1
+                if is_phone_err:
+                    total_errors += 1
                 if sat == '满意':
                     satisfaction_count += 1
                 
@@ -710,9 +717,8 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
             t8.Cell(r_idx, 2).Range.Text = farmer_name
             t8.Cell(r_idx, 3).Range.Text = str(r.get('cbfbm_short', '') or r.get('承包方编码(缩略码)', ''))
             
-            lxdh_val = str(r.get('lxdh', '') or r.get('联系电话', ''))
             cell_dh = t8.Cell(r_idx, 4)
-            if r.get('phone_correct') == 'X':
+            if is_phone_err:
                 cell_dh.Range.Text = 'X'
                 cell_dh.Range.Font.Color = 255
             else:
@@ -843,16 +849,28 @@ def export_waiye_att9(samples_rows):
         for (t_name, v_name, g_name), g_rows in groups_map.items():
             total_errors = 0
             satisfaction_count = 0
+            processed_cbfs = set()
+            c_cnt = 0
             for r in g_rows:
-                for k in ["area_acknowledged", "rights_correct", "bound_correct", "member_qualified", "self_verified", "self_signed", "phone_correct"]:
+                for k in ["area_acknowledged", "bound_correct", "self_verified"]:
                     if r.get(k) == "X":
                         total_errors += 1
-                if r.get("satisfaction") == "满意":
-                    satisfaction_count += 1
+                
+                cbf_key = str(r.get("cbfbm") or r.get("cbfbm_short") or r.get("cbfmc") or "")
+                if cbf_key not in processed_cbfs:
+                    processed_cbfs.add(cbf_key)
+                    c_cnt += 1
+                    for k in ["rights_correct", "member_qualified", "self_signed"]:
+                        if r.get(k) == "X":
+                            total_errors += 1
+                    lxdh_val = str(r.get('lxdh', '') or r.get('联系电话', '') or '').strip()
+                    if lxdh_val == 'None': lxdh_val = ''
+                    if r.get('phone_correct') == 'X' or not lxdh_val:
+                        total_errors += 1
+                    if r.get("satisfaction") == "满意":
+                        satisfaction_count += 1
                     
-            contractor_ids = {r.get("cbfbm") or r.get("cbfbm_short") or r.get("cbfmc") for r in g_rows}
-            c_cnt = len(contractor_ids) if contractor_ids else len(g_rows)
-            tot_cnt = len(g_rows)
+            c_cnt = c_cnt if c_cnt > 0 else len(g_rows)
             prog_score = max(20.0 - total_errors * 0.5, 0.0)
             effect_score = (satisfaction_count / c_cnt * 10.0) if c_cnt > 0 else 10.0
             

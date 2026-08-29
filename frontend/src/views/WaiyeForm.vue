@@ -872,18 +872,23 @@ const loadGroupSamples = async (gCode, tName, vName, gName) => {
       }
     });
     if (res.data.code === 200) {
-      groupSamples.value = res.data.data.map(item => ({
-        ...item,
-        area_acknowledged: item.area_acknowledged || '',
-        rights_correct: item.rights_correct || '',
-        bound_correct: item.bound_correct || '',
-        member_qualified: item.member_qualified || '',
-        self_verified: item.self_verified || '',
-        self_signed: item.self_signed || '',
-        satisfaction: item.satisfaction || '满意',
-        survey_method: item.survey_method || '现场',
-        signature_url: item.signature_url || ''
-      }));
+      groupSamples.value = res.data.data.map(item => {
+        const phoneVal = (item.lxdh || '').toString().trim();
+        const phoneErr = item.phone_correct ? item.phone_correct : (!phoneVal ? 'X' : '');
+        return {
+          ...item,
+          area_acknowledged: item.area_acknowledged || '',
+          rights_correct: item.rights_correct || '',
+          bound_correct: item.bound_correct || '',
+          member_qualified: item.member_qualified || '',
+          self_verified: item.self_verified || '',
+          self_signed: item.self_signed || '',
+          satisfaction: item.satisfaction || '满意',
+          survey_method: item.survey_method || '现场',
+          signature_url: item.signature_url || '',
+          phone_correct: phoneErr
+        };
+      });
     }
   } catch(e) {
     showToast('加载地块记录失败');
