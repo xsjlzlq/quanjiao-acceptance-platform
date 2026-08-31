@@ -1329,3 +1329,111 @@ async def api_delete_evidence(req: DeleteEvidenceRequest):
         return {"code": 200, "message": "凭证已成功删除"}
     except Exception as e:
         return {"code": 500, "message": f"删除凭证异常: {str(e)}"}
+
+# ================= 询问笔录 (现场问询) =================
+
+class InquirySaveRequest(BaseModel):
+    cbfbm: str
+    township_name: str
+    village_name: str
+    group_name: str
+    cbfmc: str
+    form_data: dict
+
+@app.get("/api/waiye/inquiry")
+async def get_inquiry(cbfbm: str):
+    from database import SessionLocal
+    from sqlalchemy import text
+    async with SessionLocal() as session:
+        res = await session.execute(text("SELECT form_data, signature_url, scan_file_url FROM waiye_inquiries WHERE cbfbm = :cbfbm LIMIT 1"), {"cbfbm": cbfbm})
+        row = res.fetchone()
+        if row:
+            return {"code": 200, "data": {"form_data": row[0] or {}, "signature_url": row[1] or "", "scan_file_url": row[2] or ""}}
+        return {"code": 200, "data": {"form_data": {}, "signature_url": "", "scan_file_url": ""}}
+
+@app.post("/api/waiye/inquiry")
+async def save_inquiry(req: InquirySaveRequest):
+    import json
+    from database import SessionLocal
+    from sqlalchemy import text
+    async with SessionLocal() as session:
+        res = await session.execute(text("SELECT id FROM waiye_inquiries WHERE cbfbm = :cbfbm LIMIT 1"), {"cbfbm": req.cbfbm})
+        row = res.fetchone()
+        if row:
+            await session.execute(text("""
+                UPDATE waiye_inquiries 
+                SET form_data = :form_data, updated_at = CURRENT_TIMESTAMP
+                WHERE cbfbm = :cbfbm
+            """), {"form_data": json.dumps(req.form_data), "cbfbm": req.cbfbm})
+        else:
+            await session.execute(text("""
+                INSERT INTO waiye_inquiries (cbfbm, township_name, village_name, group_name, cbfmc, form_data)
+                VALUES (:cbfbm, :t, :v, :g, :m, :form_data)
+            """), {"cbfbm": req.cbfbm, "t": req.township_name, "v": req.village_name, "g": req.group_name, "m": req.cbfmc, "form_data": json.dumps(req.form_data)})
+        await session.commit()
+    return {"code": 200, "message": "保存成功"}
+
+@app.post("/api/waiye/inquiry_scan")
+async def upload_inquiry_scan(cbfbm: str = Form(...), file: UploadFile = File(...)):
+    from database import SessionLocal
+    from sqlalchemy import text
+    os.makedirs("uploads/inquiries", exist_ok=True)
+    ext = file.filename.split('.')[-1]
+    filename = f"{cbfbm}_scan.{ext}"
+    file_path = os.path.join("uploads/inquiries", filename)
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+    url = f"/api/download?file=uploads/inquiries/{filename}"
+    
+    async with SessionLocal() as session:
+        res = await session.execute(text("SELECT id FROM waiye_inquiries WHERE cbfbm = :cbfbm LIMIT 1"), {"cbfbm": cbfbm})
+        if res.fetchone():
+            await session.execute(text("UPDATE waiye_inquiries SET scan_file_url = :url WHERE cbfbm = :cbfbm"), {"url": url, "cbfbm": cbfbm})
+        else:
+            await session.execute(text("INSERT INTO waiye_inquiries (cbfbm, scan_file_url) VALUES (:cbfbm, :url)"), {"cbfbm": cbfbm, "url": url})
+        await session.commit()
+    return {"code": 200, "message": "上传成功", "url": url}
+
+class ExportInquiryRequest(BaseModel):
+    cbfbm: str
+
+@app.post("/api/export_waiye_inquiry")
+async def api_export_waiye_inquiry(req: ExportInquiryRequest):
+    from database import SessionLocal
+    from sqlalchemy import text
+    async with SessionLocal() as session:
+        res = await session.execute(text("SELECT * FROM waiye_inquiries WHERE cbfbm = :cbfbm"), {"cbfbm": req.cbfbm})
+        row = res.fetchone()
+        if not row:
+            return {"code": 404, "message": "没有找到该农户的问询记录"}
+            
+        r_cbf = await session.execute(text("SELECT cbfzjhm, lxdh FROM cbf WHERE cbfbm = :cbfbm"), {"cbfbm": req.cbfbm})
+        cbf_row = r_cbf.fetchone()
+        lxdh = str(cbf_row[1]) if cbf_row and cbf_row[1] else ""
+        gender = "男"
+        
+        # Count parcels
+        r_dk = await session.execute(text("SELECT COUNT(*), SUM(scmj) FROM waiye_samples WHERE cbfbm = :cbfbm"), {"cbfbm": req.cbfbm})
+        dk_row = r_dk.fetchone()
+        dk_cnt = dk_row[0] if dk_row else 0
+        
+        # Get HTZMJ (from cbdkxx)
+        r_ht = await session.execute(text("SELECT SUM(htmjm) FROM cbdkxx WHERE cbfbm::text = :cbfbm"), {"cbfbm": req.cbfbm})
+        ht_row = r_ht.fetchone()
+        ht_mj = ht_row[0] if ht_row and ht_row[0] else 0.0
+        
+        data = {
+            "cbfbm": req.cbfbm,
+            "cbfmc": row[5] or "",
+            "township_name": row[2] or "",
+            "village_name": row[3] or "",
+            "group_name": row[4] or "",
+            "lxdh": lxdh,
+            "gender": gender,
+            "dk_cnt": dk_cnt,
+            "scmj": ht_mj,  # we can map HTZMJ here
+            "form_data": row[6] or {}
+        }
+    from doc_exporter import export_waiye_inquiry
+    url = await asyncio.to_thread(export_waiye_inquiry, data)
+    return {"code": 200, "url": url}

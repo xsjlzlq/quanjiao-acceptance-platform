@@ -377,7 +377,165 @@
           <div style="font-size: 15px;">请先在上方选择导出范围（全椒县或乡镇）</div>
         </div>
       </van-tab>
+    
+      <!-- ================= Tab 3: 现场问询 ================= -->
+      <van-tab title="现场问询">
+        <div v-if="!currentGroupCode" class="empty-state">
+          <van-empty description="请先在上方选择核查组别" />
+        </div>
+        <div v-else style="padding: 16px;">
+          <van-field
+            v-model="inquiryContractorName"
+            is-link
+            readonly
+            label="被询问人"
+            placeholder="请选择被询问人(承包方)"
+            @click="showInquiryPicker = true"
+          />
+          <van-popup v-model:show="showInquiryPicker" round position="bottom">
+            <van-picker
+              :columns="inquiryContractorCols"
+              @cancel="showInquiryPicker = false"
+              @confirm="onInquiryContractorConfirm"
+            />
+          </van-popup>
+
+          <div v-if="inquiryForm.cbfbm" style="margin-top: 20px;">
+            <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+              <van-button type="primary" size="small" @click="saveInquiry">保存问询记录</van-button>
+              <van-button type="success" size="small" plain @click="exportInquiry">导出附件</van-button>
+              <van-uploader accept=".pdf,image/*" :after-read="uploadInquiryScan">
+                <van-button type="warning" size="small" plain>上传扫描件</van-button>
+              </van-uploader>
+            </div>
+            
+            <div v-if="inquiryScanUrl" style="margin-bottom: 16px;">
+              <van-cell title="已上传的扫描件" is-link @click="downloadFile(inquiryScanUrl)" />
+            </div>
+
+            <van-cell-group inset title="基本信息">
+              <van-field v-model="inquiryForm.year" label="年" placeholder="填空" />
+              <van-field v-model="inquiryForm.month" label="月" placeholder="填空" />
+              <van-field v-model="inquiryForm.day" label="日" placeholder="填空" />
+              <van-field v-model="inquiryForm.hour" label="时" placeholder="填空" />
+              <van-field v-model="inquiryForm.minute" label="分" placeholder="填空" />
+              
+              <van-field name="inquiry_place" label="询问地点">
+                <template #input>
+                  <van-radio-group v-model="inquiryForm.inquiry_place" direction="horizontal">
+                    <van-radio name="农户家中">农户家中</van-radio>
+                    <van-radio name="田间地头">田间地头</van-radio>
+                    <van-radio name="村委会">村委会</van-radio>
+                  </van-radio-group>
+                </template>
+              </van-field>
+
+              <van-field name="relationship" label="与代表关系">
+                <template #input>
+                  <van-radio-group v-model="inquiryForm.relationship" direction="horizontal">
+                    <van-radio name="本人">本人</van-radio>
+                    <van-radio name="配偶">配偶</van-radio>
+                    <van-radio name="子女">子女</van-radio>
+                    <van-radio name="其他亲属">其他亲属</van-radio>
+                  </van-radio-group>
+                </template>
+              </van-field>
+              <van-field v-if="inquiryForm.relationship === '其他亲属'" v-model="inquiryForm.other_rel_desc" label="亲属说明" placeholder="填写亲属关系" />
+              
+              <van-field v-model="inquiryForm.inquirer" label="询问人" placeholder="外业核查人员" />
+              <van-field v-model="inquiryForm.recorder" label="记录人" placeholder="记录人" />
+            </van-cell-group>
+
+            <van-cell-group inset title="1. 是否知晓延包工作？" style="margin-top: 16px;">
+              <van-field name="q1_choice">
+                <template #input>
+                  <van-radio-group v-model="inquiryForm.q1_choice" direction="horizontal">
+                    <van-radio name="知道">知道</van-radio>
+                    <van-radio name="听说一点">听说一点</van-radio>
+                    <van-radio name="不知道">不知道</van-radio>
+                  </van-radio-group>
+                </template>
+              </van-field>
+              <van-field v-model="inquiryForm.q1_desc" label="补充说明" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="2. 是否向你宣传讲解过相关政策？" style="margin-top: 16px;">
+              <van-field v-model="inquiryForm.q2_desc" label="答：" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="3. 是否参加过村民会议及公示？" style="margin-top: 16px;">
+              <van-field v-model="inquiryForm.q3_desc" label="答：" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="4. 摸底信息是否本人核对确认？" style="margin-top: 16px;">
+              <van-field name="q4_choice">
+                <template #input>
+                  <van-radio-group v-model="inquiryForm.q4_choice" direction="horizontal">
+                    <van-radio name="本人签字">本人签字</van-radio>
+                    <van-radio name="家属代签">家属代签</van-radio>
+                    <van-radio name="未签字">未签字</van-radio>
+                    <van-radio name="不清楚">不清楚</van-radio>
+                  </van-radio-group>
+                </template>
+              </van-field>
+              <van-field v-model="inquiryForm.q4_desc" label="补充：" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="5. 合同是否本人签字确认？" style="margin-top: 16px;">
+              <van-field v-model="inquiryForm.q5_desc" label="答：" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="6. 现场核对地块面积四至是否一致？" style="margin-top: 16px;">
+              <van-field name="q6_choice">
+                <template #input>
+                  <van-radio-group v-model="inquiryForm.q6_choice" direction="horizontal">
+                    <van-radio name="一致">一致</van-radio>
+                    <van-radio name="部分不一致">部分不一致</van-radio>
+                  </van-radio-group>
+                </template>
+              </van-field>
+              <van-field v-model="inquiryForm.q6_desc" label="具体问题：" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="7. 家庭人口变动情况及政策是否清楚？" style="margin-top: 16px;">
+              <van-field v-model="inquiryForm.q7_desc" label="答：" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="8. 是否知晓机动地、新增耕地处置？" style="margin-top: 16px;">
+              <van-field v-model="inquiryForm.q8_desc" label="答：" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="9. 本组是否存在小调整、打乱重分？" style="margin-top: 16px;">
+              <van-field v-model="inquiryForm.q9_desc" label="答：" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="10. 有无土地纠纷、矛盾诉求？" style="margin-top: 16px;">
+              <van-field v-model="inquiryForm.q10_desc" label="答：" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="11. 对本次延包工作是否满意？" style="margin-top: 16px;">
+              <van-field name="q11_choice">
+                <template #input>
+                  <van-radio-group v-model="inquiryForm.q11_choice" direction="horizontal">
+                    <van-radio name="非常满意">非常满意</van-radio>
+                    <van-radio name="基本满意">基本满意</van-radio>
+                    <van-radio name="一般">一般</van-radio>
+                    <van-radio name="不满意">不满意</van-radio>
+                  </van-radio-group>
+                </template>
+              </van-field>
+              <van-field v-model="inquiryForm.q11_desc" label="不满意原因：" type="textarea" rows="2" autosize />
+            </van-cell-group>
+
+            <van-cell-group inset title="12. 其他补充反映问题/建议：" style="margin-top: 16px; margin-bottom: 30px;">
+              <van-field v-model="inquiryForm.q12_desc" label="答：" type="textarea" rows="3" autosize />
+            </van-cell-group>
+
+          </div>
+        </div>
+      </van-tab>
     </van-tabs>
+
 
     <!-- ================= 手写签名大弹窗 ================= -->
     <van-popup
@@ -524,6 +682,149 @@ const toggleContractorError = async (grp, field) => {
 
 const saving = ref(false);
 const exportingGroupAtt8 = ref(false);
+
+
+// ================= Tab 3: 现场问询逻辑 =================
+const showInquiryPicker = ref(false);
+const inquiryContractorName = ref('');
+const inquiryScanUrl = ref('');
+
+const inquiryForm = ref({
+  cbfbm: '',
+  year: '', month: '', day: '', hour: '', minute: '',
+  inquiry_place: '', relationship: '', other_rel_desc: '',
+  inquirer: '', recorder: '',
+  q1_choice: '', q1_desc: '',
+  q2_desc: '',
+  q3_desc: '',
+  q4_choice: '', q4_desc: '',
+  q5_desc: '',
+  q6_choice: '', q6_desc: '',
+  q7_desc: '',
+  q8_desc: '',
+  q9_desc: '',
+  q10_desc: '',
+  q11_choice: '', q11_desc: '',
+  q12_desc: ''
+});
+
+const inquiryContractorCols = computed(() => {
+  return groupedSamples.value.map(grp => ({
+    text: grp.cbfmc + ' (' + grp.cbfbm_short + ')',
+    value: grp.cbfbm,
+    cbfmc: grp.cbfmc
+  }));
+});
+
+const onInquiryContractorConfirm = async ({ selectedOptions }) => {
+  showInquiryPicker.value = false;
+  if (!selectedOptions || selectedOptions.length === 0) return;
+  const opt = selectedOptions[0];
+  inquiryContractorName.value = opt.text;
+  inquiryForm.value.cbfbm = opt.value;
+  
+  // load inquiry data
+  showLoadingToast({ message: '加载中...', forbidClick: true });
+  try {
+    const res = await axios.get('/api/waiye/inquiry?cbfbm=' + opt.value);
+    if (res.data.code === 200) {
+      const fd = res.data.data.form_data || {};
+      inquiryScanUrl.value = res.data.data.scan_file_url || '';
+      inquiryForm.value = {
+        cbfbm: opt.value,
+        year: fd.year || '', month: fd.month || '', day: fd.day || '', hour: fd.hour || '', minute: fd.minute || '',
+        inquiry_place: fd.inquiry_place || '',
+        relationship: fd.relationship || '',
+        other_rel_desc: fd.other_rel_desc || '',
+        inquirer: fd.inquirer || '',
+        recorder: fd.recorder || '',
+        q1_choice: fd.q1_choice || '', q1_desc: fd.q1_desc || '',
+        q2_desc: fd.q2_desc || '',
+        q3_desc: fd.q3_desc || '',
+        q4_choice: fd.q4_choice || '', q4_desc: fd.q4_desc || '',
+        q5_desc: fd.q5_desc || '',
+        q6_choice: fd.q6_choice || '', q6_desc: fd.q6_desc || '',
+        q7_desc: fd.q7_desc || '',
+        q8_desc: fd.q8_desc || '',
+        q9_desc: fd.q9_desc || '',
+        q10_desc: fd.q10_desc || '',
+        q11_choice: fd.q11_choice || '', q11_desc: fd.q11_desc || '',
+        q12_desc: fd.q12_desc || ''
+      };
+    }
+  } catch(e) {
+    showToast('加载失败');
+  } finally {
+    closeToast();
+  }
+};
+
+const saveInquiry = async () => {
+  showLoadingToast({ message: '保存中...', forbidClick: true });
+  try {
+    const payload = {
+      cbfbm: inquiryForm.value.cbfbm,
+      township_name: currentTownshipName.value,
+      village_name: currentVillageName.value,
+      group_name: currentGroupName.value,
+      cbfmc: inquiryContractorName.value.split(' ')[0],
+      form_data: inquiryForm.value
+    };
+    const res = await axios.post('/api/waiye/inquiry', payload);
+    if (res.data.code === 200) {
+      showToast({ type: 'success', message: '保存成功' });
+    } else {
+      showToast(res.data.message || '保存失败');
+    }
+  } catch(e) {
+    showToast('网络异常');
+  } finally {
+    closeToast();
+  }
+};
+
+const exportInquiry = async () => {
+  showLoadingToast({ message: '生成中...', forbidClick: true });
+  try {
+    // Save first
+    await saveInquiry();
+    const res = await axios.post('/api/export_waiye_inquiry', { cbfbm: inquiryForm.value.cbfbm });
+    if (res.data.code === 200) {
+      downloadFile(res.data.url);
+      showToast({ type: 'success', message: '生成成功' });
+    } else {
+      showToast(res.data.message || '生成失败');
+    }
+  } catch(e) {
+    showToast('网络异常');
+  } finally {
+    closeToast();
+  }
+};
+
+const uploadInquiryScan = async (file) => {
+  showLoadingToast({ message: '上传中...', forbidClick: true });
+  try {
+    const formData = new FormData();
+    formData.append('cbfbm', inquiryForm.value.cbfbm);
+    formData.append('file', file.file);
+    const res = await axios.post('/api/waiye/inquiry_scan', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    if (res.data.code === 200) {
+      inquiryScanUrl.value = res.data.url;
+      showToast({ type: 'success', message: '上传成功' });
+    } else {
+      showToast(res.data.message || '上传失败');
+    }
+  } catch(e) {
+    showToast('网络异常');
+  } finally {
+    closeToast();
+  }
+};
+
+// ================= Tab End =================
 
 // ================= Tab 2: 附件导出 =================
 const showExportPicker = ref(false);

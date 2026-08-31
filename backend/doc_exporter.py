@@ -1127,3 +1127,143 @@ def export_rectify_att13(township_name, neiye_form, waiye_rows):
         raise e
     finally:
         pythoncom.CoUninitialize()
+
+def export_waiye_inquiry(data):
+    import os, shutil, win32com.client, pythoncom
+    pythoncom.CoInitialize()
+    word = None
+    doc = None
+    try:
+        word = win32com.client.DispatchEx("Word.Application")
+        word.Visible = False
+        word.DisplayAlerts = 0
+        
+        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        tpl = os.path.join(base_dir, "附件", "询问笔录.doc")
+        clean_cbf = sanitize_filename(data.get("cbfmc", ""))
+        os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
+        out_path = os.path.join(base_dir, "backend", "downloads", f"附件_询问笔录_{clean_cbf}.doc")
+        if os.path.exists(out_path):
+            try: os.remove(out_path)
+            except: pass
+        shutil.copy(tpl, out_path)
+        
+        doc = word.Documents.Open(FileName=out_path, ReadOnly=False, ConfirmConversions=False)
+        
+        fd = data.get("form_data", {})
+        
+        def _replace(doc, find_text, replace_text):
+            f = doc.Content.Find
+            f.ClearFormatting()
+            f.Replacement.ClearFormatting()
+            f.Execute(FindText=find_text, ReplaceWith=replace_text, Replace=2)
+            
+        def _check(doc, target_text):
+            f = doc.Content.Find
+            f.ClearFormatting()
+            f.Replacement.ClearFormatting()
+            f.Execute(FindText="□" + target_text, ReplaceWith="☑" + target_text, Replace=2)
+            
+        # P2 meta
+        _replace(doc, "时间：     年____月____日    时____分", f"时间： {fd.get('year','  ')} 年 {fd.get('month',' ')} 月 {fd.get('day',' ')} 日 {fd.get('hour',' ')} 时 {fd.get('minute',' ')} 分")
+        _replace(doc, "地点：       镇______村      村民组", f"地点： {data.get('township_name','')} 镇 {data.get('village_name','')} 村 {data.get('group_name','')} 村民组")
+        _replace(doc, "被询问人：       性别：    ", f"被询问人： {data.get('cbfmc','')} 性别： {data.get('gender','男')} ")
+        
+        if fd.get('inquiry_place') == '农户家中': _check(doc, "农户家中")
+        elif fd.get('inquiry_place') == '田间地头': _check(doc, "田间地头")
+        elif fd.get('inquiry_place') == '村委会': _check(doc, "村委会")
+        
+        # P3 meta
+        _replace(doc, "联系电话：           与承包方代表关系：", f"联系电话： {data.get('lxdh','')}  与承包方代表关系：")
+        rel = fd.get('relationship', '')
+        if rel in ['本人', '配偶', '子女']:
+            _check(doc, rel)
+        elif rel == '其他亲属':
+            _check(doc, "其他亲属")
+            _replace(doc, "其他亲属______", f"其他亲属 {fd.get('other_rel_desc','')} ")
+            
+        _replace(doc, "地块共      块，确权面积________亩，延包合同面积______亩", f"地块共 {data.get('dk_cnt','')} 块，确权面积 {data.get('scmj','')} 亩，延包合同面积 {data.get('scmj','')} 亩")
+        _replace(doc, "询问人（外业核查人员）：         记录人：         ", f"询问人（外业核查人员）： {fd.get('inquirer','')}  记录人： {fd.get('recorder','')} ")
+        
+        # Q1
+        q1 = fd.get('q1_choice', '')
+        if q1 in ['知道', '听说一点', '不知道']: _check(doc, q1)
+        _replace(doc, "补充说明：\r                                                     ", f"补充说明：{fd.get('q1_desc',' ')}\r")
+        
+        # Q2
+        _replace(doc, "等？ 答：\r                                                     ", f"等？ 答：{fd.get('q2_desc',' ')}\r")
+        
+        # Q3
+        _replace(doc, "足够？ 答：                                        ", f"足够？ 答：{fd.get('q3_desc',' ')}")
+        
+        # Q4
+        q4 = fd.get('q4_choice', '')
+        if q4 in ['本人签字', '家属代签', '未签字', '不清楚']: _check(doc, q4)
+        _replace(doc, "补充：________________________________________________", f"补充：{fd.get('q4_desc',' ')}")
+        
+        # Q5
+        _replace(doc, "一致？ 答：\r                                                      ", f"一致？ 答：{fd.get('q5_desc',' ')}\r")
+        
+        # Q6
+        q6 = fd.get('q6_choice', '')
+        if q6 in ['一致', '部分不一致']: _check(doc, q6)
+        _replace(doc, "具体问题：\r                                                      ", f"具体问题：{fd.get('q6_desc',' ')}\r")
+        
+        # Q7
+        _replace(doc, "情况？ 答：\r                                                       ", f"情况？ 答：{fd.get('q7_desc',' ')}\r")
+        
+        # Q8
+        _replace(doc, "知情？ 答：                                          ", f"知情？ 答：{fd.get('q8_desc',' ')}")
+        
+        # Q9
+        _replace(doc, "情形？ 答：                                                ", f"情形？ 答：{fd.get('q9_desc',' ')}")
+        
+        # Q10
+        _replace(doc, "满意？ 答：                                          ", f"满意？ 答：{fd.get('q10_desc',' ')}")
+        
+        # Q11
+        q11 = fd.get('q11_choice', '')
+        if q11 in ['非常满意', '基本满意', '一般', '不满意']: _check(doc, q11)
+        _replace(doc, "不满意原因：                                        ", f"不满意原因：{fd.get('q11_desc',' ')}")
+        
+        # Q12
+        _replace(doc, "意见建议：\r                                                               ", f"意见建议：{fd.get('q12_desc',' ')}\r")
+        
+        # Signature
+        import datetime
+        now = datetime.datetime.now()
+        date_str = f"日期：{now.year}年{now.month}月{now.day}日"
+        
+        f_sig = doc.Content.Find
+        f_sig.ClearFormatting()
+        f_sig.Replacement.ClearFormatting()
+        if f_sig.Execute(FindText="被询问人（签字或按手印）：            日期：            "):
+            f_sig.Parent.Text = f"被询问人（签字或按手印）：          {date_str}"
+            f_sig2 = doc.Content.Find
+            f_sig2.ClearFormatting()
+            if f_sig2.Execute(FindText="被询问人（签字或按手印）： "):
+                rng_sig = f_sig2.Parent
+                rng_sig.Collapse(0) # Collapse to end
+                sig_path = os.path.join(base_dir, "backend", "uploads", "signatures", f"{data.get('cbfbm')}.png")
+                if os.path.exists(sig_path):
+                    pic = rng_sig.InlineShapes.AddPicture(FileName=os.path.abspath(sig_path), LinkToFile=False, SaveWithDocument=True)
+                    pic.Width = 65
+                    pic.Height = 26
+        
+        doc.SaveAs2(FileName=out_path, FileFormat=0)
+        doc.Close(0)
+        doc = None
+        word.Quit()
+        word = None
+        return f"/api/download?file=downloads/附件_询问笔录_{clean_cbf}.doc"
+    except Exception as e:
+        print("export_waiye_inquiry error:", e)
+        if doc:
+            try: doc.Close(0)
+            except: pass
+        if word:
+            try: word.Quit()
+            except: pass
+        raise e
+    finally:
+        pythoncom.CoUninitialize()
