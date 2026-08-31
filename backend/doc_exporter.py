@@ -722,7 +722,7 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
                 cell_dh.Range.Text = 'X'
                 cell_dh.Range.Font.Color = 255
             else:
-                cell_dh.Range.Text = lxdh_val
+                cell_dh.Range.Text = lxdh_val if lxdh_val else '/' 
 
             t8.Cell(r_idx, 5).Range.Text = str(r.get('dkmc', '') or r.get('地块名称', ''))
             t8.Cell(r_idx, 6).Range.Text = str(r.get('dkbm_short', '') or r.get('地块简编码', ''))
