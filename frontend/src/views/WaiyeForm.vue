@@ -873,8 +873,6 @@ const loadGroupSamples = async (gCode, tName, vName, gName) => {
     });
     if (res.data.code === 200) {
       groupSamples.value = res.data.data.map(item => {
-        const phoneVal = (item.lxdh || '').toString().trim();
-        const phoneErr = item.phone_correct ? item.phone_correct : (!phoneVal ? 'X' : '');
         return {
           ...item,
           area_acknowledged: item.area_acknowledged || '',
@@ -886,7 +884,7 @@ const loadGroupSamples = async (gCode, tName, vName, gName) => {
           satisfaction: item.satisfaction || '满意',
           survey_method: item.survey_method || '现场',
           signature_url: item.signature_url || '',
-          phone_correct: phoneErr
+          phone_correct: item.phone_correct || ''
         };
       });
     }

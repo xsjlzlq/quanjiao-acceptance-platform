@@ -698,7 +698,7 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
             lxdh_val = str(r.get('lxdh', '') or r.get('联系电话', '') or '').strip()
             if lxdh_val == 'None':
                 lxdh_val = ''
-            is_phone_err = (r.get('phone_correct') == 'X') or (not lxdh_val)
+            is_phone_err = (str(r.get('phone_correct', '')).strip() == 'X')
 
             # Contractor-level errors & satisfaction
             sat = r.get('satisfaction', '满意')
@@ -863,9 +863,7 @@ def export_waiye_att9(samples_rows):
                     for k in ["rights_correct", "member_qualified", "self_signed"]:
                         if r.get(k) == "X":
                             total_errors += 1
-                    lxdh_val = str(r.get('lxdh', '') or r.get('联系电话', '') or '').strip()
-                    if lxdh_val == 'None': lxdh_val = ''
-                    if r.get('phone_correct') == 'X' or not lxdh_val:
+                    if str(r.get('phone_correct', '')).strip() == 'X':
                         total_errors += 1
                     if r.get("satisfaction") == "满意":
                         satisfaction_count += 1
