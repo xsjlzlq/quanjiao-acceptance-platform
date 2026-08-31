@@ -3,17 +3,22 @@
     <van-nav-bar title="自查申请与任务下发" left-arrow @click-left="$router.back()" />
     
     <van-tabs v-model:active="activeTab" sticky>
-      <van-tab title="乡镇申请">
+      <van-tab title="自查申请">
         <van-cell-group inset style="margin-top:16px;">
           <van-cell 
-            v-for="ts in townships" 
-            :key="ts.code" 
+            v-for="ts in combinedTownships" 
+            :key="ts.full_code" 
             :title="ts.name" 
             :label="`权属代码: ${ts.full_code}`" 
             center
           >
             <template #right-icon>
-              <van-button size="small" type="primary" @click="generateAtt4(ts)">下载验收申请表</van-button>
+              <div style="display: flex; gap: 8px;">
+                <van-button size="small" plain type="primary" @click="generateAtt4(ts)">下载申请表</van-button>
+                <van-uploader accept=".pdf,image/*" :after-read="(file) => uploadAppForm(file, ts)">
+                  <van-button size="small" type="success">上传扫描件</van-button>
+                </van-uploader>
+              </div>
             </template>
           </van-cell>
         </van-cell-group>
@@ -134,6 +139,35 @@ const townships = ref([]);
 const villages = ref([]);
 const groups = ref([]);
 
+const combinedTownships = computed(() => {
+  return [
+    { name: '全椒县 (县级)', code: '341124', full_code: '341124', level: 'county' },
+    ...townships.value
+  ];
+});
+
+const uploadAppForm = async (file, ts) => {
+  showLoadingToast({ message: '上传中...', forbidClick: true });
+  try {
+    const formData = new FormData();
+    formData.append('file', file.file);
+    formData.append('township_name', ts.name);
+    formData.append('township_code', ts.full_code);
+    const res = await axios.post('/api/upload_appform', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    if (res.data.code === 200) {
+      showToast({ type: 'success', message: '上传成功' });
+    } else {
+      showToast(res.data.message || '上传失败');
+    }
+  } catch(e) {
+    showToast('网络异常');
+  } finally {
+    closeToast();
+  }
+};
+
 const mode = ref(2);
 
 const showTp = ref(false);
@@ -206,12 +240,19 @@ const onConfirmGp = async (opt) => {
 };
 
 const generateAtt4 = async (ts) => {
+  showLoadingToast({ message: '生成中...', forbidClick: true });
   try {
-    const res = await axios.get('/api/generate_att4?township_name=' + ts.name);
+    const res = await axios.get(`/api/generate_att4?township_name=${ts.name}&township_code=${ts.full_code}`);
     if (res.data.code === 200) {
       downloadFile(res.data.url);
+    } else {
+      showToast(res.data.message || '生成失败');
     }
-  } catch(e) { showToast('生成失败'); }
+  } catch(e) { 
+    showToast('生成失败'); 
+  } finally {
+    closeToast();
+  }
 };
 
 const downloadFile = (url) => {

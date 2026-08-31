@@ -269,9 +269,39 @@ async def download_file(file: str):
     return {"code": 404, "message": "File not found"}
 
 @app.get("/api/generate_att4")
-async def generate_att4(township_name: str = "默认乡镇"):
-    url = await asyncio.to_thread(export_att4, township_name)
+async def generate_att4(township_name: str = "默认乡镇", township_code: str = ""):
+    from database import SessionLocal
+    from sqlalchemy import text
+    async with SessionLocal() as session:
+        if township_code:
+            code_prefix = township_code
+        else:
+            r = await session.execute(text("SELECT qsdwdm FROM qsdwdmb WHERE qsdwmc = :name"), {"name": township_name})
+            code_prefix = r.scalar() or "341124"
+        
+        r_cbf = await session.execute(text("SELECT COUNT(*) FROM cbf WHERE cbfbm::text LIKE :prefix"), {"prefix": f"{code_prefix}%"})
+        farmer_count = r_cbf.scalar() or 0
+        
+        r_area = await session.execute(text("SELECT SUM(htmjm) FROM cbdkxx WHERE cbfbm::text LIKE :prefix"), {"prefix": f"{code_prefix}%"})
+        total_area = float(r_area.scalar() or 0.0)
+        
+    url = await asyncio.to_thread(export_att4, township_name, farmer_count, total_area)
     return {"code": 200, "url": url}
+
+@app.post("/api/upload_appform")
+async def upload_appform(
+    township_name: str = Form(...),
+    township_code: str = Form(""),
+    file: UploadFile = File(...)
+):
+    os.makedirs("uploads/appforms", exist_ok=True)
+    clean_ts = sanitize_filename(township_name)
+    ext = file.filename.split('.')[-1]
+    filename = f"{clean_ts}_{township_code}.{ext}"
+    file_path = os.path.join("uploads/appforms", filename)
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+    return {"code": 200, "message": "上传成功", "url": f"/api/download?file=uploads/appforms/{filename}"}
 
 @app.post("/api/sample_by_excel")
 async def do_sample_by_excel(file: UploadFile = File(...)):

@@ -571,17 +571,48 @@ def export_neiye_att7(records_by_qsdwdm):
         raise e
     finally:
         pythoncom.CoUninitialize()
-def export_att4(township_name):
-    base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
-    os.makedirs(os.path.join(base_dir, 'backend', 'downloads'), exist_ok=True)
-    template = os.path.join(base_dir, '附件', '附件4.doc')
-    clean_ts = sanitize_filename(township_name)
-    out = os.path.join(base_dir, 'backend', 'downloads', f'附件4_成果检查验收申请表_{clean_ts}.doc')
-    if os.path.exists(out):
-        try: os.remove(out)
-        except: pass
-    shutil.copy(template, out)
-    return f"/api/download?file=downloads/附件4_成果检查验收申请表_{clean_ts}.doc"
+def export_att4(township_name, farmer_count, total_area):
+    pythoncom.CoInitialize()
+    word = None
+    doc = None
+    try:
+        word = win32com.client.DispatchEx('Word.Application')
+        word.Visible = False
+        word.DisplayAlerts = 0
+        
+        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        os.makedirs(os.path.join(base_dir, 'backend', 'downloads'), exist_ok=True)
+        template = os.path.join(base_dir, '附件', '附件4.doc')
+        clean_ts = sanitize_filename(township_name)
+        out = os.path.join(base_dir, 'backend', 'downloads', f'附件4_成果检查验收申请表_{clean_ts}.doc')
+        if os.path.exists(out):
+            try: os.remove(out)
+            except: pass
+        shutil.copy(template, out)
+        
+        doc = word.Documents.Open(FileName=out, ReadOnly=False, ConfirmConversions=False)
+        t = doc.Tables(1)
+        t.Cell(1, 2).Range.Text = township_name
+        t.Cell(5, 2).Range.Text = str(farmer_count)
+        t.Cell(6, 2).Range.Text = f"{total_area:.2f}"
+        
+        doc.SaveAs2(FileName=out, FileFormat=0)
+        doc.Close(0)
+        doc = None
+        word.Quit()
+        word = None
+        return f"/api/download?file=downloads/附件4_成果检查验收申请表_{clean_ts}.doc"
+    except Exception as e:
+        print("Export att4 error:", e)
+        if doc:
+            try: doc.Close(0)
+            except: pass
+        if word:
+            try: word.Quit()
+            except: pass
+        raise e
+    finally:
+        pythoncom.CoUninitialize()
 
 def export_att5(stats_data, township_code, township_name):
     pythoncom.CoInitialize()
