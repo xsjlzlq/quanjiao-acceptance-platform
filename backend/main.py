@@ -10,7 +10,7 @@ from doc_exporter import (
     export_rectify_att12, export_rectify_att13
 )
 # -*- coding: utf-8 -*-
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
