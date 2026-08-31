@@ -197,7 +197,7 @@ const activeTab = ref(0);
 const activeCollapse = ref([]);
 
 const AUTO_SAVE_KEY = 'auto_save_settings';
-const autoSaveEnabled = ref(true);
+const autoSaveEnabled = ref(false);
 const autoSaveInterval = ref('5');
 
 const sourcePath = ref('G:\\全椒县二轮延包\\全椒县县级验收管理平台\\sources\\341124100');
@@ -276,7 +276,7 @@ onMounted(async () => {
     const raw = localStorage.getItem(AUTO_SAVE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      autoSaveEnabled.value = parsed.enabled !== false;
+      autoSaveEnabled.value = parsed.enabled === true;
       autoSaveInterval.value = String(parsed.interval || 5);
     }
   } catch (e) {}

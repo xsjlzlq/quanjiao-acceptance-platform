@@ -46,7 +46,7 @@
               <div>
                 <div>{{ currentTownshipName }} / {{ currentVillageName }} / {{ currentGroupName }}</div>
                 <div style="font-size: 11px; font-weight: normal; color: #999; margin-top: 2px;">
-                  <van-icon name="passed" color="#07c160" /> 实时静默保存 <span v-if="lastAutoSaveTime">(上次同步: {{ lastAutoSaveTime }})</span>
+                  <van-icon name="passed" color="#07c160" /> 实时保存 <span v-if="lastAutoSaveTime">(上次同步: {{ lastAutoSaveTime }})</span>
                 </div>
               </div>
               <van-tag type="primary" size="medium">{{ groupSamples.length }} 块地</van-tag>
@@ -549,7 +549,7 @@ let ctx = null;
 
 
 const AUTO_SAVE_KEY = 'auto_save_settings';
-const autoSaveConfig = ref({ enabled: true, interval: 5 });
+const autoSaveConfig = ref({ enabled: false, interval: 5 });
 const lastAutoSaveTime = ref('');
 let autoSaveTimer = null;
 
@@ -559,14 +559,14 @@ const loadAutoSaveConfig = () => {
     if (raw) {
       const parsed = JSON.parse(raw);
       autoSaveConfig.value = {
-        enabled: parsed.enabled !== false,
+        enabled: parsed.enabled === true,
         interval: Number(parsed.interval) > 0 ? Math.max(1, Math.round(Number(parsed.interval))) : 5
       };
     } else {
-      autoSaveConfig.value = { enabled: true, interval: 5 };
+      autoSaveConfig.value = { enabled: false, interval: 5 };
     }
   } catch (e) {
-    autoSaveConfig.value = { enabled: true, interval: 5 };
+    autoSaveConfig.value = { enabled: false, interval: 5 };
   }
 };
 
@@ -952,7 +952,7 @@ const saveAllSilent = async () => {
     const now = new Date();
     lastAutoSaveTime.value = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
   } catch (e) {
-    console.warn('静默保存失败', e);
+    console.warn('保存失败', e);
   }
 };
 

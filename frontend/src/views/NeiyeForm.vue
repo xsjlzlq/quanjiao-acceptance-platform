@@ -28,7 +28,7 @@
         <div>
           <div class="score-label">{{ selectedAreaName }} 内业得分：</div>
           <div style="font-size: 11px; font-weight: normal; color: #999; margin-top: 2px;">
-            <van-icon name="passed" color="#07c160" /> 实时静默保存 <span v-if="lastAutoSaveTime">(上次同步: {{ lastAutoSaveTime }})</span>
+            <van-icon name="passed" color="#07c160" /> 实时保存 <span v-if="lastAutoSaveTime">(上次同步: {{ lastAutoSaveTime }})</span>
           </div>
         </div>
         <div class="score-val">{{ totalScore }} <span class="score-max">/ {{ selectedAreaLevel === 'county' ? 15 : 70 }}分</span></div>
@@ -1403,7 +1403,7 @@ const form = ref({
 
 
 const AUTO_SAVE_KEY = 'auto_save_settings';
-const autoSaveConfig = ref({ enabled: true, interval: 5 });
+const autoSaveConfig = ref({ enabled: false, interval: 5 });
 const lastAutoSaveTime = ref('');
 let autoSaveTimer = null;
 
@@ -1413,14 +1413,14 @@ const loadAutoSaveConfig = () => {
     if (raw) {
       const parsed = JSON.parse(raw);
       autoSaveConfig.value = {
-        enabled: parsed.enabled !== false,
+        enabled: parsed.enabled === true,
         interval: Number(parsed.interval) > 0 ? Math.max(1, Math.round(Number(parsed.interval))) : 5
       };
     } else {
-      autoSaveConfig.value = { enabled: true, interval: 5 };
+      autoSaveConfig.value = { enabled: false, interval: 5 };
     }
   } catch (e) {
-    autoSaveConfig.value = { enabled: true, interval: 5 };
+    autoSaveConfig.value = { enabled: false, interval: 5 };
   }
 };
 
@@ -1724,7 +1724,7 @@ const onUploadEvidence = async (file, key) => {
       form.value.evidences = { ...form.value.evidences };
       closeToast();
       showToast({ type: 'success', message: '凭证上传成功' });
-      // 自动静默保存到数据库
+      // 自动保存到数据库
       await silentAutoSave();
     } else {
       closeToast();
