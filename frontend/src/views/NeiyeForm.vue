@@ -36,14 +36,20 @@
       <div class="btn-group">
         
         
-        <!-- Township Exports -->
+        
+          <van-button size="small" type="primary" round :loading="exportingVoucher" @click="onExportVoucher">
+            导出凭证记录
+          </van-button>
+<!-- Township Exports -->
         <template v-if="selectedAreaLevel === 'township'">
           <van-button v-if="hasPerm('neiye_export_att6')" size="small" type="success" round :loading="exporting6" @click="onExportAtt6">
             导出附件6 检查记录表
           </van-button>
         </template>
 
-        <!-- County Exports -->
+        
+
+<!-- County Exports -->
         <template v-if="selectedAreaLevel === 'county'">
           <van-button v-if="hasPerm('neiye_export_att6')" size="small" type="success" round :loading="exporting6" @click="onExportAtt6">
             导出附件6 检查记录表（1/4）
@@ -52,6 +58,17 @@
             导出附件7 检查得分表
           </van-button>
         </template>
+      </div>
+
+      <div style="margin-top: 10px; display: flex; gap: 20px; font-size: 14px; align-items: center; padding-top: 8px; border-top: 1px dashed #eee;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="white-space: nowrap;">检查者:</span>
+          <van-field v-model="form.jcz_name" placeholder="请输入" style="width: 100px; border: 1px solid #ebedf0; border-radius: 4px; padding: 4px 8px;" @blur="silentAutoSave" />
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="white-space: nowrap;">复核者:</span>
+          <van-field v-model="form.fhz_name" placeholder="请输入" style="width: 100px; border: 1px solid #ebedf0; border-radius: 4px; padding: 4px 8px;" @blur="silentAutoSave" />
+        </div>
       </div>
     </div>
 
@@ -708,23 +725,23 @@
                 </div>
               </div>
             </div>
-              <van-cell title="没有公示不足15天 (直接扣2分)" clickable @click="toggle('prog_4', '没有公示不足15天')">
+              <van-cell title="没有公示或不足15天 (直接扣2分)" clickable @click="toggle('prog_4', '没有公示或不足15天')">
                 <template #right-icon><van-checkbox name="没有公示或不足15天" @click.stop /></template>
               </van-cell>
-            <!-- 凭证上传区: 没有公示不足15天 -->
-            <div v-if="form.prog_4 && form.prog_4.includes('没有公示不足15天')" class="evidence-box">
+            <!-- 凭证上传区: 没有公示或不足15天 -->
+            <div v-if="form.prog_4 && form.prog_4.includes('没有公示或不足15天')" class="evidence-box">
               <div class="evidence-header">
                 <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
                 <div class="uploader-btns">
-                  <van-uploader :after-read="(f) => onUploadEvidence(f, '没有公示不足15天')" accept="image/*">
+                  <van-uploader :after-read="(f) => onUploadEvidence(f, '没有公示或不足15天')" accept="image/*">
                     <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
                   </van-uploader>
                 </div>
               </div>
-              <div v-if="getEvidenceList('没有公示不足15天').length > 0" class="evidence-imgs">
-                <div v-for="(img, idx) in getEvidenceList('没有公示不足15天')" :key="idx" class="img-thumb">
+              <div v-if="getEvidenceList('没有公示或不足15天').length > 0" class="evidence-imgs">
+                <div v-for="(img, idx) in getEvidenceList('没有公示或不足15天')" :key="idx" class="img-thumb">
                   <img :src="img.url" @click="previewEvidence(img.url)" />
-                  <span class="del-btn" @click.stop.prevent="removeEvidence('没有公示不足15天', idx)">×</span>
+                  <span class="del-btn" @click.stop.prevent="removeEvidence('没有公示或不足15天', idx)">×</span>
                 </div>
               </div>
             </div>
@@ -1373,10 +1390,12 @@
       <div style="font-size: 15px;">请先在上方选择核查对象（全县或乡镇）</div>
     </div>
   </div>
+
+    
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue';
 import { hasPerm } from '../utils/auth';
 import { showToast, showLoadingToast, closeToast, showImagePreview } from 'vant';
 import axios from 'axios';
@@ -1397,7 +1416,7 @@ const form = ref({
   mech_1: [], mech_2: [], mech_3: [], mech_4: [],
   prog_1: [], prog_2: [], prog_3: [], prog_4: [], prog_5: [], prog_6: [], prog_7: [],
   policy_1: [], policy_2_1: 0, policy_2_2: 0, policy_3_1: 0, policy_3_2: 0, policy_4: [], policy_5: [],
-  effect_1: [],
+  effect_1: [], jcz_name: '', fhz_name: '', jcz_sign: '', fhz_sign: '',
   evidences: {}
 });
 
@@ -1532,6 +1551,8 @@ const loadSavedData = async (code) => {
         policy_4: fd.policy_4 || [],
         policy_5: fd.policy_5 || [],
         effect_1: fd.effect_1 || [],
+        jcz_name: fd.jcz_name || '',
+        fhz_name: fd.fhz_name || '',
         evidences: fd.evidences || {}
       };
       showToast('已加载历史保存数据');
@@ -1541,7 +1562,7 @@ const loadSavedData = async (code) => {
         mech_1: [], mech_2: [], mech_3: [], mech_4: [],
         prog_1: [], prog_2: [], prog_3: [], prog_4: [], prog_5: [], prog_6: [], prog_7: [],
         policy_1: [], policy_2_1: 0, policy_2_2: 0, policy_3_1: 0, policy_3_2: 0, policy_4: [], policy_5: [],
-        effect_1: []
+        effect_1: [], jcz_name: '', fhz_name: ''
       };
     }
   } catch(e) {
@@ -1792,6 +1813,127 @@ const onSubmit = async () => {
     saving.value = false;
     closeToast();
   }
+};
+
+
+
+const exportingVoucher = ref(false);
+
+const onExportVoucher = async () => {
+  if (!selectedAreaCode.value) return;
+  exportingVoucher.value = true;
+  showLoadingToast({ message: '正在生成凭证记录...', forbidClick: true });
+  try {
+    // auto save state first
+    await axios.post('/api/save_neiye', {
+      qsdwdm: selectedAreaCode.value,
+      qsdwmc: selectedAreaName.value,
+      level: selectedAreaLevel.value,
+      form_data: form.value,
+      score: totalScore.value
+    });
+    
+    const res = await axios.post('/api/export_neiye_voucher', {
+      qsdwdm: selectedAreaCode.value,
+      qsdwmc: selectedAreaName.value,
+      level: selectedAreaLevel.value,
+      form_data: form.value
+    });
+    
+    if (res.data.code === 200 && res.data.url) {
+      showToast({ type: 'success', message: '已生成，正在下载...' });
+      triggerDownload(res.data.url);
+    } else {
+      showToast(res.data.message || '生成失败');
+    }
+  } catch(e) {
+    showToast('生成文档请求失败');
+  } finally {
+    exportingVoucher.value = false;
+  }
+};
+
+// Signature Logic
+const showSignModal = ref(false);
+const signRole = ref('');
+const canvasRef = ref(null);
+const canvasWrapperRef = ref(null);
+let ctx = null;
+let isDrawing = false;
+let hasDrawn = false;
+let lastX = 0;
+let lastY = 0;
+
+const openSignModal = (role) => {
+  signRole.value = role;
+  showSignModal.value = true;
+};
+
+const onSignModalOpened = () => {
+  nextTick(() => {
+    const canvas = canvasRef.value;
+    const wrapper = canvasWrapperRef.value;
+    if (!canvas || !wrapper) return;
+    
+    const rect = wrapper.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 2;
+    
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    
+    ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = '#000000';
+    
+    clearCanvas();
+  });
+};
+
+const clearCanvas = () => {
+  if (!canvasRef.value || !ctx) return;
+  const rect = canvasWrapperRef.value.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  hasDrawn = false;
+};
+
+const getCanvasPos = (e) => {
+  const rect = canvasRef.value.getBoundingClientRect();
+  if (e.touches && e.touches.length > 0) {
+    return {
+      x: e.touches[0].clientX - rect.left,
+      y: e.touches[0].clientY - rect.top
+    };
+  }
+  return {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top
+  };
+};
+
+const handleTouchStart = (e) => { e.preventDefault(); const p = getCanvasPos(e); isDrawing = true; lastX = p.x; lastY = p.y; };
+const handleTouchMove = (e) => { e.preventDefault(); if(!isDrawing) return; const p = getCanvasPos(e); ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke(); lastX = p.x; lastY = p.y; hasDrawn = true; };
+const handleTouchEnd = (e) => { e.preventDefault(); isDrawing = false; };
+const handleMouseDown = (e) => { const p = getCanvasPos(e); isDrawing = true; lastX = p.x; lastY = p.y; };
+const handleMouseMove = (e) => { if(!isDrawing) return; const p = getCanvasPos(e); ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke(); lastX = p.x; lastY = p.y; hasDrawn = true; };
+const handleMouseUp = () => { isDrawing = false; };
+
+const saveSignature = async () => {
+  if (!hasDrawn) {
+    showToast('请先手写签名');
+    return;
+  }
+  const dataUrl = canvasRef.value.toDataURL('image/png');
+  if (signRole.value === 'jcz') {
+    form.value.jcz_sign = dataUrl;
+  } else {
+    form.value.fhz_sign = dataUrl;
+  }
+  showSignModal.value = false;
+  showToast({ type: 'success', message: '签名已暂存，稍后随表单保存' });
+  await silentAutoSave();
 };
 
 const onExportAtt6 = async () => {

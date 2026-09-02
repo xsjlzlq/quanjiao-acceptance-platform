@@ -39,6 +39,35 @@ def _set_issues_cell(cell, issues):
 
 
 
+
+def _insert_sign_img(doc, names, sign_data):
+    if not sign_data: return
+    
+    import uuid, base64, os
+    abs_path = None
+    if sign_data.startswith("data:image"):
+        head, b64_str = sign_data.split(',', 1)
+        img_data = base64.b64decode(b64_str)
+        tmp_path = os.path.abspath(f"uploads/signatures/tmp_{uuid.uuid4().hex}.png")
+        os.makedirs("uploads/signatures", exist_ok=True)
+        with open(tmp_path, "wb") as f:
+            f.write(img_data)
+        abs_path = tmp_path
+    elif "file=" in sign_data:
+        rel_path = sign_data.split("file=")[1]
+        abs_path = os.path.abspath(rel_path)
+        
+    if not abs_path or not os.path.exists(abs_path): return
+    
+    for name in names:
+        if doc.Bookmarks.Exists(name):
+            rng = doc.Bookmarks(name).Range
+            rng.Text = ""
+            shape = rng.InlineShapes.AddPicture(FileName=abs_path, LinkToFile=False, SaveWithDocument=True)
+            ratio = shape.Width / shape.Height if shape.Height else 2
+            shape.Height = 30
+            shape.Width = 30 * ratio
+
 def _fill_bookmarks(doc, names, text):
     """Fill named bookmarks with text, padding with spaces to original length."""
     for name in names:
@@ -235,8 +264,8 @@ def fill_table_2(t2, form_data, scores):
     # R5: 调查公示
     if any("没有公示材料" in x for x in form_data.get("prog_4", [])):
         _cell_replace_checkbox(t2.Rows(5).Cells(4), "没有公示材料")
-    if any("没有公示不足15天" in x for x in form_data.get("prog_4", [])):
-        _cell_replace_checkbox(t2.Rows(5).Cells(4), "没有公示不足15天")
+    if any("没有公示或不足15天" in x for x in form_data.get("prog_4", [])):
+        _cell_replace_checkbox(t2.Rows(5).Cells(4), "没有公示或不足15天")
     if any("公示结果未确认" in x for x in form_data.get("prog_4", [])):
         _cell_replace_checkbox(t2.Rows(5).Cells(4), "公示结果未确认")
     if any("各类资料不齐全" in x for x in form_data.get("prog_4", [])):
@@ -395,6 +424,12 @@ def export_neiye_att6_township(township_name, form_data):
         # Fill 行政区划名称 bookmarks in all 4 pages (xzqh_1 ~ xzqh_4)
         _xzqh_text = "全椒县" + township_name
         _fill_bookmarks(doc, ["xzqh_1", "xzqh_2", "xzqh_3", "xzqh_4"], _xzqh_text)
+        jcz_sign = form_data.get("jcz_sign")
+        fhz_sign = form_data.get("fhz_sign")
+        _fill_bookmarks(doc, ["jcz1", "jcz2", "jcz3", "jcz4"], form_data.get("jcz_name") or "")
+        _fill_bookmarks(doc, ["fhz1", "fhz2", "fhz3", "fhz4"], form_data.get("fhz_name") or "")
+        from datetime import datetime
+        _fill_bookmarks(doc, ["date1", "date2", "date3", "date4"], datetime.now().strftime("%Y年%m月%d日"))
         
         scores = calculate_neiye_subscores(form_data)
         
@@ -432,6 +467,12 @@ def export_neiye_att6_county(form_data):
         
         # Fill 行政区划名称 bookmark for page 1 only (county export)
         _fill_bookmarks(doc, ["xzqh_1"], "全椒县")
+        jcz_sign = form_data.get("jcz_sign")
+        fhz_sign = form_data.get("fhz_sign")
+        _fill_bookmarks(doc, ["jcz1", "jcz2", "jcz3", "jcz4"], form_data.get("jcz_name") or "")
+        _fill_bookmarks(doc, ["fhz1", "fhz2", "fhz3", "fhz4"], form_data.get("fhz_name") or "")
+        from datetime import datetime
+        _fill_bookmarks(doc, ["date1", "date2", "date3", "date4"], datetime.now().strftime("%Y年%m月%d日"))
         
         scores = calculate_neiye_subscores(form_data)
         fill_table_1(doc.Tables(1), form_data, scores)
@@ -963,41 +1004,141 @@ def export_waiye_att9(samples_rows):
 # ================= 自查整改（附件12 / 附件13） =================
 
 WAIYE_FLAG_LABELS = [
-    ("area_acknowledged", "面积未确认"),
-    ("rights_correct", "权利不正确"),
-    ("bound_correct", "边界不正确"),
-    ("member_qualified", "成员不合规"),
-    ("self_verified", "未自验"),
-    ("self_signed", "未自签"),
+    ("area_acknowledged", "面积不认可"),
+    ("rights_correct", "权属不正确"),
+    ("bound_correct", "四至不正确"),
+    ("member_qualified", "成员不符合"),
+    ("self_verified", "非本人核实"),
+    ("self_signed", "非本人签名"),
+    ("phone_correct", "联系电话不正确"),
 ]
 
 def _build_rectify_rows(neiye_form, waiye_rows, township_name):
     rows = []
-    # 内业问题
+    
+    MAJOR_NEIYE = [
+        "未制定方案", "直接套用上级方案", "分工不明确", "制定程序不合法", 
+        "未召开会议", "未公示工作组名单", "公示时间不足15天", "参会人数不足法定数量", 
+        "没有延包方案", "延包方案未上报", "延包方案未公示", "未召开会议讨论延包方案", 
+        "合同版本格式不正确", "合同网签率未达到95%", "没有地块示意图", 
+        "档案整理第三方无涉密档案整理资质", "没有进行档案验收", "档案验收不符合相关标准"
+    ]
+    SEVERE_NEIYE = [
+        "支付不规范", "支付不及时", "经费没有县级兜底", "没有进行摸底", 
+        "摸底表农户未签署", "摸底表中没有表达延包意愿", "摸底表其它签署不齐全", 
+        "特殊人员摸底不清或未统计", "户变化未统计", "矛盾纠纷未登记或处理不当", 
+        "承包地变化未摸清", "没有应确尽确", "没有公示材料", "没有公示不足15天", "没有公示或不足15天",
+        "公示结果未确认", "未进行信息共享", "未与不动产登记部门有序衔接", 
+        "未保障特殊群体权益", "未保障无地户权益", "没有应收尽收", 
+        "采用不正当方式隐匿消亡户", "违背农户意愿强行推进", "确权确股不确地手续不齐全", 
+        "小调整比率过大或手续不齐全", "打乱重分", "违法调整或收回承包地", 
+        "未建立矛盾纠纷处置机制", "未建立舆情处置办法", "没有矛盾纠纷处理台账"
+    ]
+    
+    MAJOR_WAIYE = ["权属不正确", "成员不符合"]
+    SEVERE_WAIYE = ["非本人签名", "面积不认可"]
+    
+    def get_level(problem_desc, is_neiye=True):
+        if is_neiye:
+            if any(m in problem_desc for m in MAJOR_NEIYE):
+                return "重大"
+            if any(s in problem_desc for s in SEVERE_NEIYE):
+                return "较重"
+            return "一般"
+        else:
+            if any(m in problem_desc for m in MAJOR_WAIYE):
+                return "重大"
+            if any(s in problem_desc for s in SEVERE_WAIYE):
+                return "较重"
+            return "一般"
+
+    # 内业问题：先归一化，兼容旧数据中字段为字符串的情况
+    def _norm_list(v):
+        if isinstance(v, str): return [v] if v else []
+        if isinstance(v, list): return v
+        return []
+    
     if isinstance(neiye_form, dict):
+        # 列表型问题字段
         for key, val in neiye_form.items():
-            if isinstance(val, list):
-                for item in val:
-                    if item:
-                        rows.append({
-                            "source": "内业",
-                            "level": "一般",
-                            "desc": f"{township_name} {str(item)}",
-                            "scope": "",
-                            "unit": township_name,
-                        })
-    # 外业问题：waiye_samples 中标记为 X 的检查项
+            items = _norm_list(val)
+            for item in items:
+                if item:
+                    item_str = str(item)
+                    rows.append({
+                        "source": "内业",
+                        "level": get_level(item_str, is_neiye=True),
+                        "desc": f"{township_name} {item_str}",
+                        "scope": "",
+                        "unit": township_name,
+                    })
+        # 数量型问题字段：未保障特殊/无地户权益、消亡户应收尽收、不正当隐匿消亡户
+        policy_fields = [
+            ("policy_2_1", "未保障特殊群体权益"),
+            ("policy_2_2", "未保障无地户权益"),
+            ("policy_3_1", "没有应收尽收"),
+            ("policy_3_2", "采用不正当方式隐匿消亡户"),
+        ]
+        for key, label in policy_fields:
+            cnt = int(neiye_form.get(key, 0) or 0)
+            if cnt > 0:
+                rows.append({
+                    "source": "内业",
+                    "level": get_level(label, is_neiye=True),
+                    "desc": f"{township_name} {label}（{cnt}起）",
+                    "scope": str(cnt),
+                    "unit": township_name,
+                })
+    # 外业问题：waiye_samples 中按户和地块分组
+    CBF_ERRORS = [
+        ("phone_correct", "联系电话不正确"),
+        ("member_qualified", "成员不符合"),
+        ("rights_correct", "权属不正确"),
+        ("self_signed", "非本人签名"),
+    ]
+    DK_ERRORS = [
+        ("bound_correct", "四至不正确"),
+        ("area_acknowledged", "面积不认可"),
+        ("self_verified", "非本人核实"),
+    ]
+
+    from collections import defaultdict
+    waiye_groups = defaultdict(list)
     for r in (waiye_rows or []):
-        failed = [lbl for key, lbl in WAIYE_FLAG_LABELS if str(r.get(key, "")).strip() == "X"]
-        if failed:
-            loc = f"{township_name}{r.get('village_name', '')}{r.get('group_name', '')} {r.get('cbfmc', '')}".strip()
+        cbf_key = (r.get("village_name", ""), r.get("group_name", ""), r.get("cbfmc", ""), r.get("cbfbm_short", ""))
+        waiye_groups[cbf_key].append(r)
+
+    for (village_name, group_name, cbfmc, cbfbm_short), group_rows in waiye_groups.items():
+        first_r = group_rows[0]
+        cbf_failed = [lbl for key, lbl in CBF_ERRORS if str(first_r.get(key, "")).strip() == "X"]
+        
+        dk_failed_list = []
+        for r in group_rows:
+            dk_failed = [lbl for key, lbl in DK_ERRORS if str(r.get(key, "")).strip() == "X"]
+            if dk_failed:
+                dk_name = r.get("dkbm_short", "") or r.get("dkmc", "")
+                dk_failed_list.append(f"{dk_name}地块，{'、'.join(dk_failed)}")
+                
+        if cbf_failed or dk_failed_list:
+            cbf_suffix = f"({cbfbm_short})" if cbfbm_short else ""
+            loc = f"{township_name}{village_name}{group_name} {cbfmc}户{cbf_suffix}"
+            desc_parts = []
+            if cbf_failed:
+                desc_parts.append(f"承包方核查问题有：{'，'.join(cbf_failed)}。")
+            if dk_failed_list:
+                desc_parts.append(f"地块核查问题有：{'；'.join(dk_failed_list)}。")
+                
+            desc_str = "\n".join(desc_parts)
+            lvl = get_level(desc_str, is_neiye=False)
+            
             rows.append({
                 "source": "外业",
-                "level": "一般",
-                "desc": f"{loc}：{chr(0x3001).join(failed)}",
+                "level": lvl,
+                "desc": f"{loc}，{desc_str}",
                 "scope": "",
-                "unit": r.get('village_name', township_name),
+                "unit": village_name or township_name,
             })
+            
     if not rows:
         rows.append({
             "source": "",
@@ -1086,29 +1227,30 @@ def export_rectify_att13(township_name, neiye_form, waiye_rows):
         data_rows = _build_rectify_rows(neiye_form, waiye_rows, township_name)
 
         for i, item in enumerate(data_rows):
-            if i == 0:
-                t.Rows(1).Select()
-                word.Selection.InsertRowsBelow(1)
-            else:
-                t.Rows(t.Rows.Count).Select()
-                word.Selection.InsertRowsBelow(1)
+            # 始终选中当前最后一行，在其下方插入新行，保证数据顺序正确
+            t.Rows(t.Rows.Count).Select()
+            word.Selection.InsertRowsBelow(1)
             r = i + 2
-            t.Cell(r, 1).Range.Text = str(i + 1)                        # 序号
-            t.Cell(r, 2).Range.Text = item["source"]                   # 问题来源: 内业/外业/专家组
-            t.Cell(r, 3).Range.Text = item.get("level", "一般")        # 问题等级: 一般/较重/重大
+            
+            # 取消新建行的表头属性（防止从第一行继承导致全表变成表头无法跨页重复）
+            t.Rows(r).HeadingFormat = False
+            
+            row_rng = t.Rows(r).Range
+            row_rng.ParagraphFormat.Alignment = 1    # 居中
+            row_rng.Font.Bold = False                # 取消加粗
+            for c in range(1, 17):
+                t.Cell(r, c).Range.Text = ""
+            t.Cell(r, 1).Range.Text = str(i + 1)                       # 序号
+            t.Cell(r, 2).Range.Text = item["source"]                   # 问题来源
+            t.Cell(r, 3).Range.Text = item.get("level", "一般")        # 问题等级
             t.Cell(r, 4).Range.Text = item["desc"]                     # 问题具体描述
             t.Cell(r, 5).Range.Text = item.get("scope", "")            # 涉及资料/农户数量
-            t.Cell(r, 6).Range.Text = item.get("unit", "")             # 整改责任单位: 乡镇/村
-            t.Cell(r, 7).Range.Text = ""                               # 责任领导
-            t.Cell(r, 8).Range.Text = ""                               # 责任人
+            t.Cell(r, 6).Range.Text = item.get("unit", "")             # 整改责任单位
             t.Cell(r, 9).Range.Text = "对照问题逐项整改，补齐材料，规范程序"  # 整改措施
-            t.Cell(r, 10).Range.Text = ""                              # 计划完成时限
-            t.Cell(r, 11).Range.Text = ""                              # 实际完成时间
-            t.Cell(r, 12).Range.Text = ""                              # 佐证材料名称
-            t.Cell(r, 13).Range.Text = "通过"                              # 复核情况: 通过/不通过
-            t.Cell(r, 14).Range.Text = ""                              # 复核人签字
-            t.Cell(r, 15).Range.Text = "未销号"                        # 销号状态: 已销号/未销号
-            t.Cell(r, 16).Range.Text = ""                              # 备注
+            # 列13 复核情况、列15 销号状态保持为空
+
+        # 在所有数据行插入完毕后，重新设置表头重复标题行（确保生效）
+        t.Rows(1).HeadingFormat = True
 
         doc.SaveAs2(FileName=out_path, FileFormat=0)
         doc.Close(0)
@@ -1152,103 +1294,118 @@ def export_waiye_inquiry(data):
         
         fd = data.get("form_data", {})
         
-        def _replace(doc, find_text, replace_text):
-            f = doc.Content.Find
-            f.ClearFormatting()
-            f.Replacement.ClearFormatting()
-            f.Execute(FindText=find_text, ReplaceWith=replace_text, Replace=2)
-            
         def _check(doc, target_text):
             f = doc.Content.Find
             f.ClearFormatting()
             f.Replacement.ClearFormatting()
-            f.Execute(FindText="□" + target_text, ReplaceWith="☑" + target_text, Replace=2)
+            f.Execute("□" + target_text, False, False, False, False, False, True, 1, False, "☑" + target_text, 2)
             
-        # P2 meta
-        _replace(doc, "时间：     年____月____日    时____分", f"时间： {fd.get('year','  ')} 年 {fd.get('month',' ')} 月 {fd.get('day',' ')} 日 {fd.get('hour',' ')} 时 {fd.get('minute',' ')} 分")
-        _replace(doc, "地点：       镇______村      村民组", f"地点： {data.get('township_name','')} 镇 {data.get('village_name','')} 村 {data.get('group_name','')} 村民组")
-        _replace(doc, "被询问人：       性别：    ", f"被询问人： {data.get('cbfmc','')} 性别： {data.get('gender','男')} ")
+        def _fill_bm(doc, bm_name, text, underline=False):
+            if doc.Bookmarks.Exists(bm_name):
+                rng = doc.Bookmarks(bm_name).Range
+                if underline:
+                    # Pad text with spaces for better visual underline
+                    text = f" {text} "
+                rng.Text = text
+                if underline:
+                    rng.Font.Underline = 1
+                doc.Bookmarks.Add(Name=bm_name, Range=rng)
+                
+        import datetime
+        now = datetime.datetime.now()
         
-        if fd.get('inquiry_place') == '农户家中': _check(doc, "农户家中")
-        elif fd.get('inquiry_place') == '田间地头': _check(doc, "田间地头")
-        elif fd.get('inquiry_place') == '村委会': _check(doc, "村委会")
+        _fill_bm(doc, "year", str(now.year), True)
+        _fill_bm(doc, "month", str(now.month).zfill(2), True)
+        _fill_bm(doc, "day", str(now.day).zfill(2), True)
+        _fill_bm(doc, "hour", str(now.hour).zfill(2), True)
+        _fill_bm(doc, "minite", str(now.minute).zfill(2), True)
         
-        # P3 meta
-        _replace(doc, "联系电话：           与承包方代表关系：", f"联系电话： {data.get('lxdh','')}  与承包方代表关系：")
+        _fill_bm(doc, "xjqymc", data.get('township_name',''), True)
+        _fill_bm(doc, "cjqymc", data.get('village_name',''), True)
+        _fill_bm(doc, "zjqymc", data.get('group_name',''), True)
+        _fill_bm(doc, "bxwr", data.get('cbfmc',''), True)
+        _fill_bm(doc, "xb", data.get('gender','男'), True)
+        _fill_bm(doc, "lxdh", data.get('lxdh',''), True)
+        
+        place = fd.get('inquiry_place', '')
+        if place in ['农户家中', '田间地头', '村委会']:
+            _check(doc, place)
+                    
         rel = fd.get('relationship', '')
         if rel in ['本人', '配偶', '子女']:
             _check(doc, rel)
         elif rel == '其他亲属':
             _check(doc, "其他亲属")
-            _replace(doc, "其他亲属______", f"其他亲属 {fd.get('other_rel_desc','')} ")
             
-        _replace(doc, "地块共      块，确权面积________亩，延包合同面积______亩", f"地块共 {data.get('dk_cnt','')} 块，确权面积 {data.get('scmj','')} 亩，延包合同面积 {data.get('scmj','')} 亩")
-        _replace(doc, "询问人（外业核查人员）：         记录人：         ", f"询问人（外业核查人员）： {fd.get('inquirer','')}  记录人： {fd.get('recorder','')} ")
+        _fill_bm(doc, "xwr", fd.get('inquirer',''), True)
         
-        # Q1
-        q1 = fd.get('q1_choice', '')
-        if q1 in ['知道', '听说一点', '不知道']: _check(doc, q1)
-        _replace(doc, "补充说明：\r                                                     ", f"补充说明：{fd.get('q1_desc',' ')}\r")
+
+        questions = fd.get('questions', [])
+        xwnr_text = ""
         
-        # Q2
-        _replace(doc, "等？ 答：\r                                                     ", f"等？ 答：{fd.get('q2_desc',' ')}\r")
+        idx = 1
+        for q in questions:
+            if not q.get('checked'):
+                continue
+                
+            q_text = q.get('q', '')
+            xwnr_text += f"{idx}、{q_text}\r"
+            
+            opts = q.get('opts', [])
+            ans = q.get('answer', '')
+            has_desc = q.get('has_desc', False)
+            desc_label = q.get('desc_label', '')
+            desc = q.get('desc', '')
+            
+            ans_line = "答："
+            if opts:
+                opt_strs = []
+                for o in opts:
+                    if o == ans:
+                        opt_strs.append(f"☑{o}")
+                    else:
+                        opt_strs.append(f"□{o}")
+                ans_line += " ".join(opt_strs)
+                
+            if has_desc:
+                if desc_label == "答：":
+                    if not opts:
+                        ans_line += f"{desc}"
+                    else:
+                        ans_line += f"  {desc}"
+                else:
+                    ans_line += f"  {desc_label}{desc}"
+                
+            xwnr_text += ans_line + "\r"
+            idx += 1
+            
+        if doc.Bookmarks.Exists("wxnr"):
+                rng = doc.Bookmarks("wxnr").Range
+                rng.Text = xwnr_text
+                rng.Font.Size = 12  # 小四号
+                rng.ParagraphFormat.LineSpacingRule = 1  # wdLineSpace1pt5
+                rng.ParagraphFormat.SpaceBefore = 0
+                rng.ParagraphFormat.SpaceAfter = 0
+                doc.Bookmarks.Add(Name="wxnr", Range=rng)
         
-        # Q3
-        _replace(doc, "足够？ 答：                                        ", f"足够？ 答：{fd.get('q3_desc',' ')}")
-        
-        # Q4
-        q4 = fd.get('q4_choice', '')
-        if q4 in ['本人签字', '家属代签', '未签字', '不清楚']: _check(doc, q4)
-        _replace(doc, "补充：________________________________________________", f"补充：{fd.get('q4_desc',' ')}")
-        
-        # Q5
-        _replace(doc, "一致？ 答：\r                                                      ", f"一致？ 答：{fd.get('q5_desc',' ')}\r")
-        
-        # Q6
-        q6 = fd.get('q6_choice', '')
-        if q6 in ['一致', '部分不一致']: _check(doc, q6)
-        _replace(doc, "具体问题：\r                                                      ", f"具体问题：{fd.get('q6_desc',' ')}\r")
-        
-        # Q7
-        _replace(doc, "情况？ 答：\r                                                       ", f"情况？ 答：{fd.get('q7_desc',' ')}\r")
-        
-        # Q8
-        _replace(doc, "知情？ 答：                                          ", f"知情？ 答：{fd.get('q8_desc',' ')}")
-        
-        # Q9
-        _replace(doc, "情形？ 答：                                                ", f"情形？ 答：{fd.get('q9_desc',' ')}")
-        
-        # Q10
-        _replace(doc, "满意？ 答：                                          ", f"满意？ 答：{fd.get('q10_desc',' ')}")
-        
-        # Q11
-        q11 = fd.get('q11_choice', '')
-        if q11 in ['非常满意', '基本满意', '一般', '不满意']: _check(doc, q11)
-        _replace(doc, "不满意原因：                                        ", f"不满意原因：{fd.get('q11_desc',' ')}")
-        
-        # Q12
-        _replace(doc, "意见建议：\r                                                               ", f"意见建议：{fd.get('q12_desc',' ')}\r")
-        
-        # Signature
-        import datetime
-        now = datetime.datetime.now()
-        date_str = f"日期：{now.year}年{now.month}月{now.day}日"
-        
-        f_sig = doc.Content.Find
-        f_sig.ClearFormatting()
-        f_sig.Replacement.ClearFormatting()
-        if f_sig.Execute(FindText="被询问人（签字或按手印）：            日期：            "):
-            f_sig.Parent.Text = f"被询问人（签字或按手印）：          {date_str}"
-            f_sig2 = doc.Content.Find
-            f_sig2.ClearFormatting()
-            if f_sig2.Execute(FindText="被询问人（签字或按手印）： "):
-                rng_sig = f_sig2.Parent
-                rng_sig.Collapse(0) # Collapse to end
-                sig_path = os.path.join(base_dir, "backend", "uploads", "signatures", f"{data.get('cbfbm')}.png")
-                if os.path.exists(sig_path):
-                    pic = rng_sig.InlineShapes.AddPicture(FileName=os.path.abspath(sig_path), LinkToFile=False, SaveWithDocument=True)
+        # Signatures
+        sig_bxwrqm = os.path.join(base_dir, "backend", "uploads", "signatures", f"{data.get('cbfbm')}_bxwrqm.png")
+        sig_xwrqm = os.path.join(base_dir, "backend", "uploads", "signatures", f"{data.get('cbfbm')}_xwrqm.png")
+        sig_cmdbqm = os.path.join(base_dir, "backend", "uploads", "signatures", f"{data.get('cbfbm')}_cmdbqm.png")
+
+        def _insert_sig(doc, bm_name, path):
+            if os.path.exists(path):
+                if doc.Bookmarks.Exists(bm_name):
+                    rng_sig = doc.Bookmarks(bm_name).Range
+                    # Collapse to start
+                    rng_sig.Collapse(1)
+                    pic = rng_sig.InlineShapes.AddPicture(FileName=os.path.abspath(path), LinkToFile=False, SaveWithDocument=True)
                     pic.Width = 65
                     pic.Height = 26
+
+        _insert_sig(doc, "bxwrqm", sig_bxwrqm)
+        _insert_sig(doc, "xwrqm", sig_xwrqm)
+        _insert_sig(doc, "cmdbqm", sig_cmdbqm)
         
         doc.SaveAs2(FileName=out_path, FileFormat=0)
         doc.Close(0)

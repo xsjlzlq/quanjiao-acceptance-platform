@@ -66,6 +66,6 @@ async def get_all_township_scores(session):
             township_scores[t_name]["effect_wai"] = avg_eff
             
     for t_name, sc in township_scores.items():
-        sc["total"] = sc["mech"] + sc["prog_nei"] + sc["policy"] + sc["effect_nei"] + sc["prog_wai"] + sc["effect_wai"]
+        sc["total"] = round(round(sc["mech"], 1) + round(sc["prog_nei"], 1) + round(sc["prog_wai"], 1) + round(sc["policy"], 1) + round(sc["effect_nei"], 1) + round(sc["effect_wai"], 1), 1)
         
     return township_scores, county_mech, has_county

@@ -76,19 +76,29 @@
           </div>
 
           <!-- 地块核查列表 -->
-          <div style="padding: 10px 16px 4px 16px; font-size: 14px; font-weight: bold; color: #323233;">
-            抽样地块清单（对附件8错误项点击打 X）：
+          <div style="padding: 10px 16px 4px 16px; font-size: 14px; font-weight: bold; color: #323233; display: flex; justify-content: space-between; align-items: center;">
+            <span>抽样地块清单（对附件8错误项点击打 X）：</span>
           </div>
 
+          <!-- 新增检索功能 -->
+          <van-search
+            v-model="searchQuery"
+            placeholder="按承包方编码或名称检索"
+            shape="round"
+            background="transparent"
+            @update:model-value="currentContractorPage = 1"
+            clearable
+          />
+
           <div 
-            v-for="(grp, index) in groupedSamples" 
+            v-for="(grp, index) in paginatedGroupedSamples" 
             :key="grp.cbfbm"
             class="parcel-card"
           >
             <!-- ================== 承包方层级信息 ================== -->
             <div class="parcel-header" style="background: #eef5fe; padding: 12px 14px; border-bottom: 1px solid #ebedf0; display: block;">
               <div class="farmer-info" style="margin-bottom: 6px;">
-                <span class="index-badge" style="background: #1989fa;">{{ index + 1 }}</span>
+                <span class="index-badge" style="background: #1989fa;">{{ grp._originalIndex + 1 }}</span>
                 <span class="farmer-name" style="font-size: 16px;">{{ grp.cbfmc }}</span>
                 <span class="code-tag">编码: {{ grp.cbfbm_short }}</span>
                 <van-button size="mini" type="primary" plain round style="margin-left:auto; padding: 0 10px;" @click="showMembers(grp.parcels[0])">成员详情</van-button>
@@ -190,14 +200,12 @@
                     </div>
                     <div class="sig-action-hint-inline">
                       <van-icon name="edit" /> 重签
-                    </div>
-                  </template>
+                    </div></template>
                   <template v-else>
                     <div class="sig-placeholder-inline">
                       <van-icon name="edit" size="20" color="#1989fa" />
                       <div class="sig-text-inline">点击签名</div>
-                    </div>
-                  </template>
+                    </div></template>
                 </div>
               </div>
             </div>
@@ -258,6 +266,19 @@
                 </div>
               </div>
             </div>
+          </div>
+          
+          <van-pagination
+            v-if="filteredGroupedSamples.length > 0"
+            v-model="currentContractorPage"
+            :total-items="filteredGroupedSamples.length"
+            :items-per-page="contractorPageSize"
+            :show-page-size="5"
+            force-ellipses
+            style="margin: 10px 16px; padding-bottom: 20px;"
+          />
+          <div v-else class="empty-box" style="padding: 20px;">
+            未找到匹配的承包方
           </div>
         </div>
 
@@ -363,7 +384,7 @@
                   >
                     下载附件8
                   </van-button>
-                </template>
+</template>
               </van-cell>
             </van-cell-group>
           </div>
@@ -388,7 +409,7 @@
             v-model="inquiryContractorName"
             is-link
             readonly
-            label="被询问人"
+            label="被询问人(承包方)"
             placeholder="请选择被询问人(承包方)"
             @click="showInquiryPicker = true"
           />
@@ -404,7 +425,7 @@
             <div style="display: flex; gap: 8px; margin-bottom: 16px;">
               <van-button type="primary" size="small" @click="saveInquiry">保存问询记录</van-button>
               <van-button type="success" size="small" plain @click="exportInquiry">导出附件</van-button>
-              <van-uploader accept=".pdf,image/*" :after-read="uploadInquiryScan">
+              <van-uploader accept=".pdf,image/*" result-type="file" :after-read="uploadInquiryScan">
                 <van-button type="warning" size="small" plain>上传扫描件</van-button>
               </van-uploader>
             </div>
@@ -413,12 +434,16 @@
               <van-cell title="已上传的扫描件" is-link @click="downloadFile(inquiryScanUrl)" />
             </div>
 
-            <van-cell-group inset title="基本信息">
-              <van-field v-model="inquiryForm.year" label="年" placeholder="填空" />
-              <van-field v-model="inquiryForm.month" label="月" placeholder="填空" />
-              <van-field v-model="inquiryForm.day" label="日" placeholder="填空" />
-              <van-field v-model="inquiryForm.hour" label="时" placeholder="填空" />
-              <van-field v-model="inquiryForm.minute" label="分" placeholder="填空" />
+            <van-cell-group inset title="基本信息">              <van-field v-model="inquiryForm.cbfmc" label="被询问人姓名" placeholder="请输入被询问人姓名" />
+              <van-field name="gender" label="性别">
+                <template #input>
+                  <van-radio-group v-model="inquiryForm.gender" direction="horizontal">
+                    <van-radio name="男">男</van-radio>
+                    <van-radio name="女">女</van-radio>
+                  </van-radio-group>
+</template>
+              </van-field>
+              <van-field v-model="inquiryForm.lxdh" label="联系电话" placeholder="请输入联系电话" />
               
               <van-field name="inquiry_place" label="询问地点">
                 <template #input>
@@ -427,7 +452,7 @@
                     <van-radio name="田间地头">田间地头</van-radio>
                     <van-radio name="村委会">村委会</van-radio>
                   </van-radio-group>
-                </template>
+</template>
               </van-field>
 
               <van-field name="relationship" label="与代表关系">
@@ -438,106 +463,80 @@
                     <van-radio name="子女">子女</van-radio>
                     <van-radio name="其他亲属">其他亲属</van-radio>
                   </van-radio-group>
-                </template>
+</template>
               </van-field>
               <van-field v-if="inquiryForm.relationship === '其他亲属'" v-model="inquiryForm.other_rel_desc" label="亲属说明" placeholder="填写亲属关系" />
               
               <van-field v-model="inquiryForm.inquirer" label="询问人" placeholder="外业核查人员" />
-              <van-field v-model="inquiryForm.recorder" label="记录人" placeholder="记录人" />
+              
             </van-cell-group>
 
-            <van-cell-group inset title="1. 是否知晓延包工作？" style="margin-top: 16px;">
-              <van-field name="q1_choice">
-                <template #input>
-                  <van-radio-group v-model="inquiryForm.q1_choice" direction="horizontal">
-                    <van-radio name="知道">知道</van-radio>
-                    <van-radio name="听说一点">听说一点</van-radio>
-                    <van-radio name="不知道">不知道</van-radio>
-                  </van-radio-group>
-                </template>
-              </van-field>
-              <van-field v-model="inquiryForm.q1_desc" label="补充说明" type="textarea" rows="2" autosize />
+            
+            <div style="margin-top: 20px; font-weight: bold; margin-left: 16px;">问询内容（可根据实际勾选、补充记录）</div>
+            
+            <van-cell-group v-for="q in currentQuestions" :key="q.id" inset style="margin-top: 16px; margin-bottom: 16px;">
+              <template #title>
+                <van-checkbox v-model="q.checked" shape="square">{{ q.q }}</van-checkbox>
+</template>
+              <div :style="{ opacity: q.checked ? 1 : 0.4, pointerEvents: q.checked ? 'auto' : 'none' }">
+                <van-field v-if="q.opts.length > 0" :name="'q_choice_'+q.id">
+                  <template #input>
+                    <van-radio-group v-model="q.answer" direction="horizontal">
+                      <van-radio v-for="opt in q.opts" :key="opt" :name="opt" style="margin-bottom: 8px;">{{ opt }}</van-radio>
+                    </van-radio-group></template>
+                </van-field>
+                <van-field v-if="q.has_desc" v-model="q.desc" :label="q.desc_label" type="textarea" rows="2" autosize />
+              </div>
+            </van-cell-group>
+            
+                        <van-pagination 
+              v-model="currentPage" 
+              :total-items="40" 
+              :items-per-page="10" 
+              style="margin: 20px 0;"
+            />
+
+            <div style="margin-top: 20px; font-weight: bold; margin-left: 16px; margin-bottom: 10px;">被询问人确认</div>
+            <van-cell-group inset style="margin-bottom: 30px;">
+              <div style="display: flex; justify-content: space-between; padding: 16px;">
+                
+                <!-- bxwrqm -->
+                <div style="flex: 1; margin: 0 4px; text-align: center;">
+                  <div style="font-size: 12px; margin-bottom: 8px;">被询问人签名</div>
+                  <div @click="openInquirySign('bxwrqm')" style="height: 60px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 4px; overflow: hidden; cursor: pointer;">
+                    <img v-if="inquiryForm.bxwrqm" :src="inquiryForm.bxwrqm" style="max-height: 100%; max-width: 100%;" />
+                    <van-icon v-else name="edit" size="24" color="#ccc" />
+                  </div>
+                </div>
+
+                <!-- xwrqm -->
+                <div style="flex: 1; margin: 0 4px; text-align: center;">
+                  <div style="font-size: 12px; margin-bottom: 8px;">询问人签名</div>
+                  <div @click="openInquirySign('xwrqm')" style="height: 60px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 4px; overflow: hidden; cursor: pointer;">
+                    <img v-if="inquiryForm.xwrqm" :src="inquiryForm.xwrqm" style="max-height: 100%; max-width: 100%;" />
+                    <van-icon v-else name="edit" size="24" color="#ccc" />
+                  </div>
+                </div>
+
+                <!-- cmdbqm -->
+                <div style="flex: 1; margin: 0 4px; text-align: center;">
+                  <div style="font-size: 12px; margin-bottom: 8px;">村民代表签名</div>
+                  <div @click="openInquirySign('cmdbqm')" style="height: 60px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 4px; overflow: hidden; cursor: pointer;">
+                    <img v-if="inquiryForm.cmdbqm" :src="inquiryForm.cmdbqm" style="max-height: 100%; max-width: 100%;" />
+                    <van-icon v-else name="edit" size="24" color="#ccc" />
+                  </div>
+                </div>
+
+              </div>
             </van-cell-group>
 
-            <van-cell-group inset title="2. 是否向你宣传讲解过相关政策？" style="margin-top: 16px;">
-              <van-field v-model="inquiryForm.q2_desc" label="答：" type="textarea" rows="2" autosize />
-            </van-cell-group>
-
-            <van-cell-group inset title="3. 是否参加过村民会议及公示？" style="margin-top: 16px;">
-              <van-field v-model="inquiryForm.q3_desc" label="答：" type="textarea" rows="2" autosize />
-            </van-cell-group>
-
-            <van-cell-group inset title="4. 摸底信息是否本人核对确认？" style="margin-top: 16px;">
-              <van-field name="q4_choice">
-                <template #input>
-                  <van-radio-group v-model="inquiryForm.q4_choice" direction="horizontal">
-                    <van-radio name="本人签字">本人签字</van-radio>
-                    <van-radio name="家属代签">家属代签</van-radio>
-                    <van-radio name="未签字">未签字</van-radio>
-                    <van-radio name="不清楚">不清楚</van-radio>
-                  </van-radio-group>
-                </template>
-              </van-field>
-              <van-field v-model="inquiryForm.q4_desc" label="补充：" type="textarea" rows="2" autosize />
-            </van-cell-group>
-
-            <van-cell-group inset title="5. 合同是否本人签字确认？" style="margin-top: 16px;">
-              <van-field v-model="inquiryForm.q5_desc" label="答：" type="textarea" rows="2" autosize />
-            </van-cell-group>
-
-            <van-cell-group inset title="6. 现场核对地块面积四至是否一致？" style="margin-top: 16px;">
-              <van-field name="q6_choice">
-                <template #input>
-                  <van-radio-group v-model="inquiryForm.q6_choice" direction="horizontal">
-                    <van-radio name="一致">一致</van-radio>
-                    <van-radio name="部分不一致">部分不一致</van-radio>
-                  </van-radio-group>
-                </template>
-              </van-field>
-              <van-field v-model="inquiryForm.q6_desc" label="具体问题：" type="textarea" rows="2" autosize />
-            </van-cell-group>
-
-            <van-cell-group inset title="7. 家庭人口变动情况及政策是否清楚？" style="margin-top: 16px;">
-              <van-field v-model="inquiryForm.q7_desc" label="答：" type="textarea" rows="2" autosize />
-            </van-cell-group>
-
-            <van-cell-group inset title="8. 是否知晓机动地、新增耕地处置？" style="margin-top: 16px;">
-              <van-field v-model="inquiryForm.q8_desc" label="答：" type="textarea" rows="2" autosize />
-            </van-cell-group>
-
-            <van-cell-group inset title="9. 本组是否存在小调整、打乱重分？" style="margin-top: 16px;">
-              <van-field v-model="inquiryForm.q9_desc" label="答：" type="textarea" rows="2" autosize />
-            </van-cell-group>
-
-            <van-cell-group inset title="10. 有无土地纠纷、矛盾诉求？" style="margin-top: 16px;">
-              <van-field v-model="inquiryForm.q10_desc" label="答：" type="textarea" rows="2" autosize />
-            </van-cell-group>
-
-            <van-cell-group inset title="11. 对本次延包工作是否满意？" style="margin-top: 16px;">
-              <van-field name="q11_choice">
-                <template #input>
-                  <van-radio-group v-model="inquiryForm.q11_choice" direction="horizontal">
-                    <van-radio name="非常满意">非常满意</van-radio>
-                    <van-radio name="基本满意">基本满意</van-radio>
-                    <van-radio name="一般">一般</van-radio>
-                    <van-radio name="不满意">不满意</van-radio>
-                  </van-radio-group>
-                </template>
-              </van-field>
-              <van-field v-model="inquiryForm.q11_desc" label="不满意原因：" type="textarea" rows="2" autosize />
-            </van-cell-group>
-
-            <van-cell-group inset title="12. 其他补充反映问题/建议：" style="margin-top: 16px; margin-bottom: 30px;">
-              <van-field v-model="inquiryForm.q12_desc" label="答：" type="textarea" rows="3" autosize />
-            </van-cell-group>
-
+            </div>
           </div>
-        </div>
-      </van-tab>
+        </van-tab>
+
     </van-tabs>
 
-
-    <!-- ================= 手写签名大弹窗 ================= -->
+      <!-- ================= 手写签名大弹窗 ================= -->
     <van-popup
       v-model:show="showSignModal"
       round
@@ -601,7 +600,7 @@
             <template #title>
               <div style="font-weight: bold; font-size: 15px;">{{ m.name }} <van-tag type="primary" style="margin-left: 6px;">{{ relationDict[m.relation] || m.relation || '未知' }}</van-tag></div>
               <div style="font-size: 12px; color: #666; margin-top: 4px;">证件: {{ m.id_no }}</div>
-            </template>
+</template>
           </van-cell>
         </van-cell-group>
         <van-empty v-else description="暂无家庭成员数据" />
@@ -623,6 +622,18 @@
       </div>
     </van-popup>
 
+      <!-- ================= 现场问询专用签名弹窗 ================= -->
+      <van-popup v-model:show="inquirySignModal" @opened="() => { inquirySignReady = true; }" @closed="() => { inquirySignReady = false; }" teleport="body" round position="bottom" style="height: 60%; z-index: 9999; display: flex; flex-direction: column; overflow: hidden;">
+        <div style="padding: 16px; font-weight: bold; text-align: center; display: flex; justify-content: space-between; flex-shrink: 0; background: #fff; z-index: 2;">
+          <span style="visibility: hidden;">关闭</span>
+          <span>手写签名 ({{ currentInquirySignLabel }})</span>
+          <van-icon name="cross" @click="closeInquirySignModal" size="18" />
+        </div>
+        <div style="flex: 1; overflow: hidden; position: relative; background: #fafbfc;">
+          <van-signature v-if="inquirySignReady" @submit="onInquirySignSubmit" @clear="onInquirySignClear" clear-button-text="清除" pen-color="#000" />
+        </div>
+      </van-popup>
+
 </template>
 
 <script setup>
@@ -632,6 +643,438 @@ import { showToast, showLoadingToast, closeToast } from 'vant';
 import axios from 'axios';
 
 const activeTab = ref(0);
+
+  const INQUIRY_QUESTIONS = [
+  {
+    "id": 1,
+    "q": "您是否知道本村、本组正在开展第二轮土地承包到期后再延长 30 年试点工作？",
+    "opts": [
+      "完全知道",
+      "听说一点",
+      "完全不知道"
+    ],
+    "has_desc": true,
+    "desc_label": "补充："
+  },
+  {
+    "id": 2,
+    "q": "您是通过哪些渠道了解到延包试点工作的？",
+    "opts": [
+      "村组开会",
+      "村干部上门宣讲",
+      "宣传一封信 / 宣传单",
+      "微信群",
+      "听邻里说",
+      "其他"
+    ],
+    "has_desc": true,
+    "desc_label": "其他渠道："
+  },
+  {
+    "id": 3,
+    "q": "村组干部是否上门向您讲解过延包相关政策？",
+    "opts": [
+      "上门讲解过",
+      "广播喇叭宣传",
+      "仅张贴公告未上门",
+      "没有任何宣传"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 4,
+    "q": "您是否收到过延包政策宣传信、宣传彩页等纸质宣传材料？",
+    "opts": [
+      "收到",
+      "没有收到",
+      "记不清"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 5,
+    "q": "您是否了解本次延包坚持 “大稳定、小调整” 的基本原则？",
+    "opts": [
+      "了解",
+      "听过但不懂含义",
+      "完全不了解"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 6,
+    "q": "您是否了解延包以原承包关系顺延为主的政策要求？",
+    "opts": [
+      "了解",
+      "听过但不懂含义",
+      "完全不了解"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 7,
+    "q": "您是否参加过本村或者本组召开的土地延包相关村民会议、村民代表会议？",
+    "opts": [
+      "本人到场参会",
+      "家属代为参会",
+      "没有参加",
+      "不知道开过会"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 8,
+    "q": "召开延包相关会议时，是否有会议签到、会议记录？您是否看到？",
+    "opts": [
+      "看到过",
+      "没看到",
+      "不清楚"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 9,
+    "q": "本组集体经济组织延包实施方案是否在村组进行过公示？",
+    "opts": [
+      "看到公示",
+      "听说公示过但本人没看到",
+      "没有公示",
+      "不清楚"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 10,
+    "q": "您记得延包方案公示大概公示多少天？",
+    "opts": [
+      "15 天及以上",
+      "不足 15 天",
+      "不清楚"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 11,
+    "q": "公示期间，村组是否收集群众对延包方案提出的意见？",
+    "opts": [
+      "收集过意见",
+      "没有征集意见",
+      "不清楚"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 12,
+    "q": "您户是否收到村组下发的土地延包摸底调查表？",
+    "opts": [
+      "收到纸质表格",
+      "村干部现场登记",
+      "没有收到、没有登记"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 13,
+    "q": "摸底调查表登记的家庭承包家庭成员信息是否与您家庭实际情况一致？",
+    "opts": [
+      "全部一致",
+      "部分不一致",
+      "完全不一致"
+    ],
+    "has_desc": true,
+    "desc_label": "具体："
+  },
+  {
+    "id": 14,
+    "q": "摸底调查表是否是您本人签字确认？",
+    "opts": [
+      "本人签字",
+      "配偶签字",
+      "其他家属代签",
+      "没有签字",
+      "不清楚"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 15,
+    "q": "摸底调查表中登记的承包地块数量和您实际耕种地块数量是否一致？",
+    "opts": [
+      "全部一致",
+      "少登记地块",
+      "多登记地块",
+      "部分地块信息错误"
+    ],
+    "has_desc": true,
+    "desc_label": "多少块："
+  },
+  {
+    "id": 16,
+    "q": "摸底调查表登记的地块面积和您实际耕种面积是否相符？",
+    "opts": [
+      "相符",
+      "面积偏大",
+      "面积偏小"
+    ],
+    "has_desc": true,
+    "desc_label": "差异情况："
+  },
+  {
+    "id": 17,
+    "q": "摸底调查表登记的各地块四至（东、南、西、北边界）是否与实地相符？",
+    "opts": [
+      "全部相符",
+      "部分地块四至错误"
+    ],
+    "has_desc": true,
+    "desc_label": "写明地块："
+  },
+  {
+    "id": 18,
+    "q": "摸底过程中，村组工作人员是否到田间实地核对过您家承包地块？",
+    "opts": [
+      "全部地块实地核对",
+      "部分地块核对",
+      "没有到现场核对"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 19,
+    "q": "您家庭近年有无婚入、婚出、离婚、丧偶人员？人员土地权益是否落实到位？",
+    "opts": [],
+    "has_desc": true,
+    "desc_label": "答："
+  },
+  {
+    "id": 20,
+    "q": "家庭有无出嫁妇女，出嫁妇女在本组是否保留承包土地？",
+    "opts": [
+      "保留土地",
+      "土地被收回",
+      "不清楚政策"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 21,
+    "q": "家庭有无入赘人员，该人员在本组是否享有土地承包相关权益？",
+    "opts": [
+      "享有承包权益",
+      "未享有",
+      "不清楚"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 22,
+    "q": "家庭有无整户消亡、部分家庭成员死亡情况，对应承包地处置您是否知情？",
+    "opts": [],
+    "has_desc": true,
+    "desc_label": "答："
+  },
+  {
+    "id": 23,
+    "q": "家庭有无在校大学生、现役军人、公职人员，对应人员土地承包权益处置是否清楚？",
+    "opts": [],
+    "has_desc": true,
+    "desc_label": "答："
+  },
+  {
+    "id": 24,
+    "q": "您户有无新增人口，新增人口是否分到承包地？",
+    "opts": [
+      "分到",
+      "未分到",
+      "本组没有分配土地政策"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 25,
+    "q": "本组是否存在无地农户、少地农户？您是否了解对这类农户的处置办法？",
+    "opts": [],
+    "has_desc": true,
+    "desc_label": "答："
+  },
+  {
+    "id": 26,
+    "q": "本组是否开展承包地小调整？如果有，小调整的理由是什么？",
+    "opts": [
+      "没有开展小调整",
+      "开展过小调整"
+    ],
+    "has_desc": true,
+    "desc_label": "理由："
+  },
+  {
+    "id": 27,
+    "q": "本组有没有出现把农户承包地打乱重新分配的情况？",
+    "opts": [
+      "没有打乱重分",
+      "存在打乱重分情况"
+    ],
+    "has_desc": true,
+    "desc_label": "简述："
+  },
+  {
+    "id": 28,
+    "q": "本组是否推行确权确股不确地模式？",
+    "opts": [
+      "没有推行",
+      "推行确权确股不确地"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 29,
+    "q": "如果推行确权确股不确地，是否征求过您户的意见，是否经过您户同意？",
+    "opts": [
+      "征求并同意",
+      "未征求意见直接执行",
+      "不适用（未推行）"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 30,
+    "q": "本组是否有机动地？您是否知晓机动地面积、位置？",
+    "opts": [
+      "知道机动地情况",
+      "听说有机动地但不清楚详情",
+      "没有机动地",
+      "不清楚"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 31,
+    "q": "机动地发包使用情况是否向村民进行公示？",
+    "opts": [
+      "公示过",
+      "没有公示",
+      "不清楚"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 32,
+    "q": "本组是否存在新增耕地，新增耕地如何处置您是否知情？",
+    "opts": [],
+    "has_desc": true,
+    "desc_label": "答："
+  },
+  {
+    "id": 33,
+    "q": "本组有没有整户消亡农户的承包地，该类土地是如何处置的？",
+    "opts": [],
+    "has_desc": true,
+    "desc_label": "答："
+  },
+  {
+    "id": 34,
+    "q": "延包调查结果、承包地块归户表是否在村组进行公示？您是否看到公示材料？",
+    "opts": [
+      "看到公示",
+      "听说公示未看到",
+      "没有公示",
+      "不清楚"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 35,
+    "q": "承包调查结果公示时间是否达到政策要求的期限？",
+    "opts": [
+      "达到期限",
+      "时间不够",
+      "记不清"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 36,
+    "q": "公示之后，村组是否收集农户对公示结果的异议？您户有没有提出异议？",
+    "opts": [
+      "收集过异议，本人提过异议",
+      "收集过，本人无异议",
+      "没有收集异议"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 37,
+    "q": "您户是否签订第二轮土地承包到期再延长 30 年土地承包合同？",
+    "opts": [
+      "已经签订",
+      "未签订"
+    ],
+    "has_desc": true,
+    "desc_label": "原因："
+  },
+  {
+    "id": 38,
+    "q": "延包土地承包合同是否为您本人或者合法授权委托人签字？",
+    "opts": [
+      "本人签字",
+      "授权家属签字",
+      "他人代签未授权",
+      "没有签字"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  },
+  {
+    "id": 39,
+    "q": "延包合同登记的地块、面积、四至和您实际耕种土地是否一致？",
+    "opts": [
+      "全部一致",
+      "部分不一致"
+    ],
+    "has_desc": true,
+    "desc_label": "写明问题："
+  },
+  {
+    "id": 40,
+    "q": "您是否查看过延包合同完整内容，对合同条款有无异议？",
+    "opts": [
+      "完整看过无异议",
+      "粗略看过",
+      "没有看过合同内容"
+    ],
+    "has_desc": false,
+    "desc_label": ""
+  }
+];
+  const currentPage = ref(1);
+  const currentQuestions = computed(() => inquiryForm.value.questions.slice((currentPage.value - 1) * 10, currentPage.value * 10));
+
+
+  const downloadFile = (url) => {
+    window.open(url, '_blank');
+  };
 
 // ================= Tab 1: 外业核查 =================
 const showCascader = ref(false);
@@ -645,6 +1088,10 @@ const currentGroupName = ref('');
 const currentGroupCode = ref('');
 
 const groupSamples = ref([]);
+
+const searchQuery = ref('');
+const currentContractorPage = ref(1);
+const contractorPageSize = ref(1); // 默认每页显示1个承包方
 
 const groupedSamples = computed(() => {
   const map = new Map();
@@ -670,6 +1117,31 @@ const groupedSamples = computed(() => {
   return Array.from(map.values());
 });
 
+const filteredGroupedSamples = computed(() => {
+  const query = (searchQuery.value || '').trim();
+  let filtered = groupedSamples.value;
+  
+  if (query) {
+    filtered = filtered.filter(grp => {
+      const matchName = grp.cbfmc && grp.cbfmc.includes(query);
+      const matchCode = (grp.cbfbm && grp.cbfbm.includes(query)) || (grp.cbfbm_short && grp.cbfbm_short.includes(query));
+      return matchName || matchCode;
+    });
+  }
+  
+  // Attach original index for display
+  return filtered.map((grp, idx) => {
+    // 找到它在未筛选前的索引
+    grp._originalIndex = groupedSamples.value.findIndex(g => g.cbfbm === grp.cbfbm);
+    return grp;
+  });
+});
+
+const paginatedGroupedSamples = computed(() => {
+  const start = (currentContractorPage.value - 1) * contractorPageSize.value;
+  return filteredGroupedSamples.value.slice(start, start + contractorPageSize.value);
+});
+
 const toggleContractorError = async (grp, field) => {
   if (!grp.parcels.length) return;
   const isError = grp.parcels[0][field] === 'X';
@@ -690,25 +1162,41 @@ const inquiryContractorName = ref('');
 const inquiryScanUrl = ref('');
 
 const inquiryForm = ref({
-  cbfbm: '',
-  year: '', month: '', day: '', hour: '', minute: '',
-  inquiry_place: '', relationship: '', other_rel_desc: '',
-  inquirer: '', recorder: '',
-  q1_choice: '', q1_desc: '',
-  q2_desc: '',
-  q3_desc: '',
-  q4_choice: '', q4_desc: '',
-  q5_desc: '',
-  q6_choice: '', q6_desc: '',
-  q7_desc: '',
-  q8_desc: '',
-  q9_desc: '',
-  q10_desc: '',
-  q11_choice: '', q11_desc: '',
-  q12_desc: ''
+      cbfbm: '',
+    cbfmc: '', gender: '男', lxdh: '',
+    inquiry_place: '', relationship: '', other_rel_desc: '',
+    inquirer: '', bxwrqm: '', xwrqm: '', cmdbqm: '',
+  questions: JSON.parse(JSON.stringify(INQUIRY_QUESTIONS)).map(q => ({...q, checked: false, answer: '', desc: ''}))
 });
 
-const inquiryContractorCols = computed(() => {
+
+  const inquirySignModal = ref(false);
+  const inquirySignReady = ref(false);
+  const currentInquirySignType = ref('');
+  const currentInquirySignLabel = computed(() => {
+    if (currentInquirySignType.value === 'bxwrqm') return '被询问人';
+    if (currentInquirySignType.value === 'xwrqm') return '询问人';
+    if (currentInquirySignType.value === 'cmdbqm') return '村民代表';
+    return '';
+  });
+
+  const openInquirySign = (type) => {
+    currentInquirySignType.value = type;
+    inquirySignModal.value = true;
+  };
+  const closeInquirySignModal = () => {
+    inquirySignModal.value = false;
+  };
+  const onInquirySignSubmit = (data) => {
+    inquiryForm.value[currentInquirySignType.value] = data.image;
+    showToast('签名已暂存，请点击保存问询记录生效');
+    closeInquirySignModal();
+  };
+  const onInquirySignClear = () => {
+    inquiryForm.value[currentInquirySignType.value] = '';
+  };
+
+  const inquiryContractorCols = computed(() => {
   return groupedSamples.value.map(grp => ({
     text: grp.cbfmc + ' (' + grp.cbfbm_short + ')',
     value: grp.cbfbm,
@@ -731,25 +1219,19 @@ const onInquiryContractorConfirm = async ({ selectedOptions }) => {
       const fd = res.data.data.form_data || {};
       inquiryScanUrl.value = res.data.data.scan_file_url || '';
       inquiryForm.value = {
-        cbfbm: opt.value,
-        year: fd.year || '', month: fd.month || '', day: fd.day || '', hour: fd.hour || '', minute: fd.minute || '',
-        inquiry_place: fd.inquiry_place || '',
-        relationship: fd.relationship || '',
-        other_rel_desc: fd.other_rel_desc || '',
-        inquirer: fd.inquirer || '',
-        recorder: fd.recorder || '',
-        q1_choice: fd.q1_choice || '', q1_desc: fd.q1_desc || '',
-        q2_desc: fd.q2_desc || '',
-        q3_desc: fd.q3_desc || '',
-        q4_choice: fd.q4_choice || '', q4_desc: fd.q4_desc || '',
-        q5_desc: fd.q5_desc || '',
-        q6_choice: fd.q6_choice || '', q6_desc: fd.q6_desc || '',
-        q7_desc: fd.q7_desc || '',
-        q8_desc: fd.q8_desc || '',
-        q9_desc: fd.q9_desc || '',
-        q10_desc: fd.q10_desc || '',
-        q11_choice: fd.q11_choice || '', q11_desc: fd.q11_desc || '',
-        q12_desc: fd.q12_desc || ''
+                  cbfbm: opt.value,
+          cbfmc: fd.cbfmc || opt.cbfmc || '', gender: fd.gender || '男', lxdh: fd.lxdh || '',
+          inquiry_place: fd.inquiry_place || '',
+          relationship: fd.relationship || '',
+          other_rel_desc: fd.other_rel_desc || '',
+          inquirer: fd.inquirer || '', bxwrqm: fd.bxwrqm || '', xwrqm: fd.xwrqm || '', cmdbqm: fd.cmdbqm || '',
+                  questions: JSON.parse(JSON.stringify(INQUIRY_QUESTIONS)).map(q => {
+            const savedQ = (fd.questions || []).find(sq => sq.id === q.id);
+            if (savedQ) {
+              return { ...q, checked: savedQ.checked || false, answer: savedQ.answer || '', desc: savedQ.desc || '' };
+            }
+            return { ...q, checked: false, answer: '', desc: '' };
+          })
       };
     }
   } catch(e) {
@@ -777,17 +1259,24 @@ const saveInquiry = async () => {
       showToast(res.data.message || '保存失败');
     }
   } catch(e) {
-    showToast('网络异常');
-  } finally {
     closeToast();
+    showToast('网络异常');
   }
 };
 
 const exportInquiry = async () => {
   showLoadingToast({ message: '生成中...', forbidClick: true });
   try {
-    // Save first
-    await saveInquiry();
+    // Save silently first
+    const payload = {
+      cbfbm: inquiryForm.value.cbfbm,
+      township_name: currentTownshipName.value,
+      village_name: currentVillageName.value,
+      group_name: currentGroupName.value,
+      cbfmc: inquiryContractorName.value.split(' ')[0],
+      form_data: inquiryForm.value
+    };
+    await axios.post('/api/waiye/inquiry', payload);
     const res = await axios.post('/api/export_waiye_inquiry', { cbfbm: inquiryForm.value.cbfbm });
     if (res.data.code === 200) {
       downloadFile(res.data.url);
@@ -796,9 +1285,8 @@ const exportInquiry = async () => {
       showToast(res.data.message || '生成失败');
     }
   } catch(e) {
-    showToast('网络异常');
-  } finally {
     closeToast();
+    showToast('网络异常');
   }
 };
 
@@ -807,10 +1295,14 @@ const uploadInquiryScan = async (file) => {
   try {
     const formData = new FormData();
     formData.append('cbfbm', inquiryForm.value.cbfbm);
-    formData.append('file', file.file);
+    const currentOpt = inquiryContractorCols.value.find(c => c.value === inquiryForm.value.cbfbm);
+    const cbfmc = currentOpt ? currentOpt.cbfmc : '';
+    formData.append('cbfmc', cbfmc);
+    let actualFile = Array.isArray(file) ? file[0] : file; actualFile = actualFile.file || actualFile; formData.append('file', actualFile);
     const res = await axios.post('/api/waiye/inquiry_scan', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
+    closeToast();
     if (res.data.code === 200) {
       inquiryScanUrl.value = res.data.url;
       showToast({ type: 'success', message: '上传成功' });
@@ -818,9 +1310,8 @@ const uploadInquiryScan = async (file) => {
       showToast(res.data.message || '上传失败');
     }
   } catch(e) {
-    showToast('网络异常');
-  } finally {
     closeToast();
+    showToast('网络异常');
   }
 };
 

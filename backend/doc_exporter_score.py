@@ -60,16 +60,15 @@ def export_att10(township_scores, county_mech):
         # Row 13 is the County
         count_evaluated = len([sc for sc in township_scores.values() if sc])
         if count_evaluated > 0:
-            avg_mech = (sum(sc["mech"] for sc in township_scores.values() if sc) + county_mech) / (count_evaluated + 1)
+            avg_mech = round((sum(sc["mech"] for sc in township_scores.values() if sc) + county_mech) / (count_evaluated + 1), 1)
             avg_prog_nei = sum(sc["prog_nei"] for sc in township_scores.values() if sc) / count_evaluated
             avg_prog_wai = sum(sc["prog_wai"] for sc in township_scores.values() if sc) / count_evaluated
-            avg_policy = sum(sc["policy"] for sc in township_scores.values() if sc) / count_evaluated
+            avg_policy = round(sum(sc["policy"] for sc in township_scores.values() if sc) / count_evaluated, 1)
             avg_effect_nei = sum(sc["effect_nei"] for sc in township_scores.values() if sc) / count_evaluated
             avg_effect_wai = sum(sc["effect_wai"] for sc in township_scores.values() if sc) / count_evaluated
-            avg_total = avg_mech + avg_prog_nei + avg_prog_wai + avg_policy + avg_effect_nei + avg_effect_wai
-            
-            avg_prog = avg_prog_nei + avg_prog_wai
-            avg_effect = avg_effect_nei + avg_effect_wai
+            avg_prog = round(avg_prog_nei + avg_prog_wai, 1)
+            avg_effect = round(avg_effect_nei + avg_effect_wai, 1)
+            avg_total = round(avg_mech + avg_prog + avg_policy + avg_effect, 1)
         else:
             avg_mech = county_mech
             avg_prog = 50.0
@@ -124,43 +123,30 @@ def export_att11(county_avg, special1, special2, special3, final_score):
         doc = word.Documents.Open(FileName=out_path, ReadOnly=False, ConfirmConversions=False)
         t = doc.Tables(1)
         
-        t.Cell(2, 4).Range.Text = format_score(county_avg.get("mech", 15.0))
-        t.Cell(3, 4).Range.Text = format_score(county_avg.get("prog_nei", 30.0) + county_avg.get("prog_wai", 20.0))
-        t.Cell(4, 4).Range.Text = format_score(county_avg.get("policy", 15.0))
+        t.Cell(2, 4).Range.Text = format_score(round(county_avg.get("mech", 15.0), 1))
+        t.Cell(3, 4).Range.Text = format_score(round(county_avg.get("prog_nei", 30.0) + county_avg.get("prog_wai", 20.0), 1))
+        t.Cell(4, 4).Range.Text = format_score(round(county_avg.get("policy", 15.0), 1))
         
         
-        effect_score = county_avg.get("effect_nei", 10.0) + county_avg.get("effect_wai", 10.0)
+        effect_score = round(county_avg.get("effect_nei", 10.0) + county_avg.get("effect_wai", 10.0), 1)
         deduct_total = (0.5 if special1 else 0.0) + (1.0 if special2 else 0.0) + special3
         if deduct_total > 0:
             effect_score -= deduct_total
-            rng = t.Cell(5, 5).Range
-            find = rng.Find
             
-            if special1:
-                find.Text = '□对落实省市级验收方案要求不严格的'
-                find.Replacement.Text = '☑对落实省市级验收方案要求不严格的'
-                find.Execute(Replace=2)
-                
-            if special2:
-                find.Text = '□对落实省市级验收方案要求走过场、未能反映真实情况的'
-                find.Replacement.Text = '☑对落实省市级验收方案要求走过场、未能反映真实情况的'
-                find.Execute(Replace=2)
-                
-            if special3 > 0:
-                find.Text = '□对存在整组未延包的'
-                find.Replacement.Text = '☑对存在整组未延包的'
-                find.Execute(Replace=2)
-                
-                find.Text = '扣0.5-1分。'
-                find.Replacement.Text = f'扣0.5-1分。（实际扣除：{special3}分）。'
-                find.Execute(Replace=2)
- # wdReplaceAll
+        rng_cell = t.Cell(5, 5).Range
+        cell_text = rng_cell.Text
+        if cell_text.endswith('\r\x07'):
+            cell_text = cell_text[:-2]
             
-            rng = t.Cell(5, 5).Range
-            find = rng.Find
-            find.Text = '扣0.5-1分。'
-            find.Replacement.Text = f'扣0.5-1分。（实际扣除：{special3}分）。'
-            find.Execute(Replace=2)
+        if special1:
+            cell_text = cell_text.replace('□对落实省市级验收方案要求不严格的', '☑对落实省市级验收方案要求不严格的')
+        if special2:
+            cell_text = cell_text.replace('□对落实省市级验收方案要求走过场', '☑对落实省市级验收方案要求走过场')
+        if special3 > 0:
+            cell_text = cell_text.replace('□对存在整组未延包的', '☑对存在整组未延包的')
+            cell_text = cell_text.replace('扣0.5-1分。', f'扣0.5-1分。（实际扣除：{special3}分）。')
+            
+        rng_cell.Text = cell_text
             
         t.Cell(5, 4).Range.Text = format_score(effect_score)
         
@@ -180,20 +166,26 @@ def export_att11(county_avg, special1, special2, special3, final_score):
             accept_level = '不合格'
             
         find = doc.Content.Find
-        find.Text = '检查结果评定为'
+        find.ClearFormatting()
+        find.Text = '检查结果评定为：'
         find.Execute()
         if find.Found:
             rng = find.Parent
-            rng.End = rng.End + 6
-            rng.Text = f'检查结果评定为 {check_level} '
+            rng.Collapse(0) # wdCollapseEnd
+            rng.MoveEndUntil('，')
+            rng.Text = f'  {check_level}  '
+            rng.Font.Underline = 1
             
         find = doc.Content.Find
+        find.ClearFormatting()
         find.Text = '验收结果评定为'
         find.Execute()
         if find.Found:
             rng = find.Parent
-            rng.End = rng.End + 6
-            rng.Text = f'验收结果评定为 {accept_level} '
+            rng.Collapse(0)
+            rng.MoveEndUntil('。')
+            rng.Text = f'  {accept_level}  '
+            rng.Font.Underline = 1
         
         doc.SaveAs2(FileName=out_path, FileFormat=0)
         doc.Close(0)

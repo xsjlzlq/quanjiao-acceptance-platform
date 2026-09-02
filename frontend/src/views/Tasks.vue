@@ -15,7 +15,7 @@
             <template #right-icon>
               <div style="display: flex; gap: 8px;">
                 <van-button size="small" plain type="primary" @click="generateAtt4(ts)">下载申请表</van-button>
-                <van-uploader accept=".pdf,image/*" :after-read="(file) => uploadAppForm(file, ts)">
+                <van-uploader accept=".pdf,image/*" result-type="file" :after-read="(file) => uploadAppForm(file, ts)">
                   <van-button size="small" type="success">上传扫描件</van-button>
                 </van-uploader>
               </div>
@@ -63,7 +63,7 @@
         <van-cell-group inset title="上传抽样表格 (方式三)" v-if="mode === 3" style="margin-top: 16px;">
           <van-cell title="上传文件">
             <template #label>
-              <van-uploader v-model="fileList" accept=".xls,.xlsx" max-count="1" />
+              <van-uploader v-model="fileList" accept=".xls,.xlsx" result-type="file" max-count="1" />
             </template>
           </van-cell>
           <div style="padding:0 16px; font-size:12px; color:#999; margin-bottom:10px;">
@@ -150,21 +150,21 @@ const uploadAppForm = async (file, ts) => {
   showLoadingToast({ message: '上传中...', forbidClick: true });
   try {
     const formData = new FormData();
-    formData.append('file', file.file);
+    let actualFile = Array.isArray(file) ? file[0] : file; actualFile = actualFile.file || actualFile; formData.append('file', actualFile);
     formData.append('township_name', ts.name);
     formData.append('township_code', ts.full_code);
     const res = await axios.post('/api/upload_appform', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
+    closeToast();
     if (res.data.code === 200) {
       showToast({ type: 'success', message: '上传成功' });
     } else {
       showToast(res.data.message || '上传失败');
     }
   } catch(e) {
-    showToast('网络异常');
-  } finally {
     closeToast();
+    showToast('网络异常');
   }
 };
 

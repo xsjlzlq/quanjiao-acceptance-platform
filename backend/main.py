@@ -7,7 +7,7 @@ from PIL import Image, ImageOps
 from doc_exporter import (
     export_docs, export_att4, export_att5, export_waiye_att8, export_waiye_att9,
     export_neiye_att6_township, export_neiye_att6_county, export_neiye_att7,
-    export_rectify_att12, export_rectify_att13
+    export_rectify_att12, export_rectify_att13, sanitize_filename
 )
 # -*- coding: utf-8 -*-
 from fastapi import FastAPI, UploadFile, File, Form
@@ -297,10 +297,10 @@ async def upload_appform(
     os.makedirs("uploads/appforms", exist_ok=True)
     clean_ts = sanitize_filename(township_name)
     ext = file.filename.split('.')[-1]
-    filename = f"{clean_ts}_{township_code}.{ext}"
+    filename = f"{clean_ts}（{township_code}）_验收申请表.{ext}"
     file_path = os.path.join("uploads/appforms", filename)
     with open(file_path, "wb") as f:
-        f.write(await file.read())
+        shutil.copyfileobj(file.file, f)
     return {"code": 200, "message": "上传成功", "url": f"/api/download?file=uploads/appforms/{filename}"}
 
 @app.post("/api/sample_by_excel")
@@ -308,7 +308,7 @@ async def do_sample_by_excel(file: UploadFile = File(...)):
     os.makedirs("uploads/抽样表", exist_ok=True)
     file_path = os.path.join("uploads/抽样表", file.filename)
     with open(file_path, "wb") as f:
-        f.write(await file.read())
+        shutil.copyfileobj(file.file, f)
         
     try:
         df = pd.read_excel(file_path)
@@ -1094,47 +1094,12 @@ async def api_export_att11(req: ExportAtt1011Request):
         "effect_wai": county_effect_wai
     }
     deduct = (0.5 if req.special1 else 0.0) + (1.0 if req.special2 else 0.0) + req.special3
-    final_score = county_mech + county_prog_nei + county_policy + county_effect_nei + county_prog_wai + county_effect_wai - deduct
+    final_score = round(county_mech, 1) + round(county_prog_nei, 1) + round(county_policy, 1) + round(county_effect_nei, 1) + round(county_prog_wai, 1) + round(county_effect_wai, 1) - deduct
     final_score = max(final_score, 0.0)
     
     url = await asyncio.to_thread(export_att11, county_avg, req.special1, req.special2, req.special3, final_score)
     return {"code": 200, "url": url}
 
-@app.post("/api/export_att11")
-async def api_export_att11(req: ExportAtt1011Request):
-    from score_service import get_all_township_scores
-    from doc_exporter_score import export_att11
-    async with SessionLocal() as session:
-        scores = await get_all_township_scores(session)
-        
-    county_mech = 15.0
-    county_prog_nei = 30.0
-    county_policy = 15.0
-    county_effect_nei = 10.0
-    county_prog_wai = 20.0
-    county_effect_wai = 10.0
-    
-    if len(scores) > 0:
-        county_mech = sum(s["mech"] for s in scores.values()) / len(scores)
-        county_prog_nei = sum(s["prog_nei"] for s in scores.values()) / len(scores)
-        county_policy = sum(s["policy"] for s in scores.values()) / len(scores)
-        county_effect_nei = sum(s["effect_nei"] for s in scores.values()) / len(scores)
-        county_prog_wai = sum(s["prog_wai"] for s in scores.values()) / len(scores)
-        county_effect_wai = sum(s["effect_wai"] for s in scores.values()) / len(scores)
-        
-    county_avg = {
-        "mech": county_mech,
-        "prog_nei": county_prog_nei,
-        "policy": county_policy,
-        "effect_nei": county_effect_nei,
-        "prog_wai": county_prog_wai,
-        "effect_wai": county_effect_wai
-    }
-    final_score = county_mech + county_prog_nei + county_policy + county_effect_nei + county_prog_wai + county_effect_wai - req.specialDeduct
-    final_score = max(final_score, 0.0)
-    
-    url = await asyncio.to_thread(export_att11, county_avg, req.specialDeduct, final_score)
-    return {"code": 200, "url": url}
 
 # ================= 自查整改（附件12 / 附件13） =================
 
@@ -1158,7 +1123,8 @@ async def api_export_rectify_att13(township_code: str = "", township_name: str =
         r2 = await session.execute(text("""
             SELECT village_name, group_name, cbfmc,
                    area_acknowledged, rights_correct, bound_correct,
-                   member_qualified, self_verified, self_signed
+                   member_qualified, self_verified, self_signed, phone_correct,
+                   cbfbm_short, dkbm_short, dkmc
             FROM waiye_samples WHERE township_name = :name
         """), {"name": township_name})
         for r in r2.fetchall():
@@ -1172,6 +1138,10 @@ async def api_export_rectify_att13(township_code: str = "", township_name: str =
                 "member_qualified": r[6],
                 "self_verified": r[7],
                 "self_signed": r[8],
+                "phone_correct": r[9],
+                "cbfbm_short": r[10] or "",
+                "dkbm_short": r[11] or "",
+                "dkmc": r[12] or ""
             })
     url = await asyncio.to_thread(export_rectify_att13, township_name, neiye_form, waiye_rows)
     return {"code": 200, "url": url}
@@ -1354,8 +1324,23 @@ async def get_inquiry(cbfbm: str):
 @app.post("/api/waiye/inquiry")
 async def save_inquiry(req: InquirySaveRequest):
     import json
+    import base64
     from database import SessionLocal
     from sqlalchemy import text
+    
+    for sign_key in ['bxwrqm', 'xwrqm', 'cmdbqm']:
+        sig_data = req.form_data.get(sign_key, '')
+        if sig_data and sig_data.startswith('data:image'):
+            try:
+                os.makedirs("uploads/signatures", exist_ok=True)
+                head, base64_str = sig_data.split(',', 1)
+                img_data = base64.b64decode(base64_str)
+                with open(os.path.join("uploads", "signatures", f"{req.cbfbm}_{sign_key}.png"), "wb") as f:
+                    f.write(img_data)
+                req.form_data[sign_key] = f"/api/download?file=uploads/signatures/{req.cbfbm}_{sign_key}.png"
+            except Exception as e:
+                print(f"Failed to save {sign_key}:", e)
+
     async with SessionLocal() as session:
         res = await session.execute(text("SELECT id FROM waiye_inquiries WHERE cbfbm = :cbfbm LIMIT 1"), {"cbfbm": req.cbfbm})
         row = res.fetchone()
@@ -1374,15 +1359,15 @@ async def save_inquiry(req: InquirySaveRequest):
     return {"code": 200, "message": "保存成功"}
 
 @app.post("/api/waiye/inquiry_scan")
-async def upload_inquiry_scan(cbfbm: str = Form(...), file: UploadFile = File(...)):
+async def upload_inquiry_scan(cbfbm: str = Form(...), cbfmc: str = Form(""), file: UploadFile = File(...)):
     from database import SessionLocal
     from sqlalchemy import text
     os.makedirs("uploads/inquiries", exist_ok=True)
     ext = file.filename.split('.')[-1]
-    filename = f"{cbfbm}_scan.{ext}"
+    filename = f"{cbfbm}_{cbfmc}.{ext}" if cbfmc else f"{cbfbm}_scan.{ext}"
     file_path = os.path.join("uploads/inquiries", filename)
     with open(file_path, "wb") as f:
-        f.write(await file.read())
+        shutil.copyfileobj(file.file, f)
     url = f"/api/download?file=uploads/inquiries/{filename}"
     
     async with SessionLocal() as session:
@@ -1422,18 +1407,34 @@ async def api_export_waiye_inquiry(req: ExportInquiryRequest):
         ht_row = r_ht.fetchone()
         ht_mj = ht_row[0] if ht_row and ht_row[0] else 0.0
         
+        fd = row[6] or {}
         data = {
             "cbfbm": req.cbfbm,
-            "cbfmc": row[5] or "",
+            "cbfmc": fd.get("cbfmc", row[5] or ""),
             "township_name": row[2] or "",
             "village_name": row[3] or "",
             "group_name": row[4] or "",
-            "lxdh": lxdh,
-            "gender": gender,
+            "lxdh": fd.get("lxdh", lxdh),
+            "gender": fd.get("gender", gender),
             "dk_cnt": dk_cnt,
-            "scmj": ht_mj,  # we can map HTZMJ here
-            "form_data": row[6] or {}
+            "scmj": ht_mj,
+            "form_data": fd
         }
     from doc_exporter import export_waiye_inquiry
     url = await asyncio.to_thread(export_waiye_inquiry, data)
     return {"code": 200, "url": url}
+from voucher_exporter import export_voucher
+
+class ExportNeiyeVoucherRequest(BaseModel):
+    qsdwdm: str
+    qsdwmc: str
+    level: str
+    form_data: dict
+
+@app.post("/api/export_neiye_voucher")
+async def api_export_neiye_voucher(req: ExportNeiyeVoucherRequest):
+    url = await asyncio.to_thread(export_voucher, req.qsdwdm, req.qsdwmc, req.form_data)
+    if url:
+        return {"code": 200, "url": url}
+    else:
+        return {"code": 500, "message": "Failed to generate voucher record"}
