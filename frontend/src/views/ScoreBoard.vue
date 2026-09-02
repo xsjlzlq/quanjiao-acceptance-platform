@@ -42,10 +42,9 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { hasPerm } from '../utils/auth';
 import { showToast, showConfirmDialog } from 'vant';
-
 
 import axios from 'axios';
 
@@ -61,7 +60,9 @@ const scoreData = ref({
 const exporting10 = ref(false);
 const exporting11 = ref(false);
 
-import { onMounted } from 'vue';
+const special1 = ref(false);
+const special2 = ref(false);
+const special3 = ref(0);
 
 onMounted(async () => {
   try {
@@ -69,8 +70,26 @@ onMounted(async () => {
     if (res.data.code === 200) {
       scoreData.value = res.data.data;
     }
+    const res2 = await axios.get('/api/special_deductions');
+    if (res2.data.code === 200) {
+      special1.value = res2.data.data.special1;
+      special2.value = res2.data.data.special2;
+      special3.value = res2.data.data.special3;
+    }
   } catch (e) {
     console.error(e);
+  }
+});
+
+watch([special1, special2, special3], async ([s1, s2, s3]) => {
+  try {
+    await axios.post('/api/special_deductions', {
+      special1: s1,
+      special2: s2,
+      special3: s3
+    });
+  } catch (e) {
+    console.error('保存特殊情形扣分失败', e);
   }
 });
 
@@ -115,10 +134,6 @@ const onExportAtt11 = async () => {
 };
 
 
-
-const special1 = ref(false);
-const special2 = ref(false);
-const special3 = ref(0);
 
 const finalScore = computed(() => {
   let total = Object.values(scoreData.value).reduce((a, b) => a + b, 0);

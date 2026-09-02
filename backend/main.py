@@ -25,7 +25,64 @@ from database import SessionLocal
 from data_importer import import_data_from_path
 import auth as auth_module
 
+from batch_exporter import run_batch_export
+
 app = FastAPI(title="全椒县二轮延包验收系统 API")
+
+@app.get("/api/select_export_dir")
+async def api_select_export_dir():
+    import subprocess
+    import asyncio
+    
+    def _pick_dir():
+        ps_script = """
+        [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null
+        $folderBrowser = New-Object System.Windows.Forms.FolderBrowserDialog
+        $folderBrowser.Description = "请选择导出存放目录"
+        $folderBrowser.ShowNewFolderButton = $true
+        
+        $form = New-Object System.Windows.Forms.Form
+        $form.TopMost = $true
+        
+        $result = $folderBrowser.ShowDialog($form)
+        if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+            Write-Output $folderBrowser.SelectedPath
+        }
+        """
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_script],
+                capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            return result.stdout.strip()
+        except Exception as e:
+            print("Folder picker error:", e)
+            return ""
+            
+    folder_path = await asyncio.to_thread(_pick_dir)
+    if folder_path:
+        return {"code": 200, "path": folder_path}
+    return {"code": 400, "message": "已取消选择"}
+
+class BatchExportRequest(BaseModel):
+    level: str
+    township_code: str = ""
+    township_name: str = ""
+    attachments: List[str] = []
+    
+@app.post("/api/batch_export")
+async def api_batch_export(req: BatchExportRequest):
+    try:
+        url = await run_batch_export(
+            req.level, req.township_code, req.township_name, req.attachments
+        )
+        if url:
+            return {"code": 200, "url": url}
+        else:
+            return {"code": 500, "message": "批量打包失败"}
+    except Exception as e:
+        print("Batch export error:", e)
+        return {"code": 500, "message": f"服务器异常: {str(e)}"}
 
 @app.on_event("startup")
 async def startup_event():
@@ -1147,6 +1204,46 @@ async def api_export_rectify_att13(township_code: str = "", township_name: str =
     return {"code": 200, "url": url}
 
 
+
+class SpecialDeductionsRequest(BaseModel):
+    special1: bool
+    special2: bool
+    special3: float
+
+@app.get("/api/special_deductions")
+async def get_special_deductions():
+    async with SessionLocal() as session:
+        r = await session.execute(text("SELECT form_data FROM neiye_records WHERE qsdwdm = '341124'"))
+        row = r.fetchone()
+        if row and row[0]:
+            fd = row[0]
+            return {"code": 200, "data": {
+                "special1": fd.get("special1", False),
+                "special2": fd.get("special2", False),
+                "special3": fd.get("special3", 0.0)
+            }}
+        return {"code": 200, "data": {"special1": False, "special2": False, "special3": 0.0}}
+
+@app.post("/api/special_deductions")
+async def save_special_deductions(req: SpecialDeductionsRequest):
+    async with SessionLocal() as session:
+        r = await session.execute(text("SELECT form_data FROM neiye_records WHERE qsdwdm = '341124'"))
+        row = r.fetchone()
+        fd = row[0] if (row and row[0]) else {}
+        fd["special1"] = req.special1
+        fd["special2"] = req.special2
+        fd["special3"] = req.special3
+        
+        sql = text('''
+            INSERT INTO neiye_records (qsdwdm, qsdwmc, level, form_data, score, updated_at)
+            VALUES ('341124', '全椒县', 'county', :fd, 0, CURRENT_TIMESTAMP)
+            ON CONFLICT (qsdwdm) DO UPDATE SET
+                form_data = EXCLUDED.form_data,
+                updated_at = CURRENT_TIMESTAMP
+        ''')
+        await session.execute(sql, {"fd": json.dumps(fd)})
+        await session.commit()
+    return {"code": 200, "message": "保存成功"}
 
 # ================= 认证 & 用户管理 API =================
 

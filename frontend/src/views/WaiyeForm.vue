@@ -400,7 +400,7 @@
       </van-tab>
     
       <!-- ================= Tab 3: 现场问询 ================= -->
-      <van-tab title="现场问询">
+      <van-tab title="现场问询" v-if="hasPerm('waiye_inquiry')">
         <div v-if="!currentGroupCode" class="empty-state">
           <van-empty description="请先在上方选择核查组别" />
         </div>

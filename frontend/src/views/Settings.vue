@@ -12,42 +12,6 @@
     </van-nav-bar>
 
     <van-tabs v-model:active="activeTab" sticky color="#1989fa">
-      <!-- ================= 标签页 1：自动保存 ================= -->
-      <van-tab title="自动保存" v-if="hasPerm('settings_autosave')">
-        <van-cell-group inset title="核查状态自动保存配置" style="margin-top: 16px;">
-          <van-cell center title="启用核查自动保存" label="开启后内业与外业核查将按设定间隔定时自动保存至数据库">
-            <template #right-icon>
-              <van-switch v-model="autoSaveEnabled" size="22" @change="onAutoSaveToggle" />
-            </template>
-          </van-cell>
-
-          <van-field
-            v-if="autoSaveEnabled"
-            v-model="autoSaveInterval"
-            type="digit"
-            label="自动保存间隔"
-            placeholder="请输入分钟数 (默认5分钟)"
-          >
-            <template #extra>
-              <span>分钟 (默认5分钟)</span>
-            </template>
-          </van-field>
-
-          <div style="margin: 16px;">
-            <van-button round block type="primary" plain @click="saveAutoSaveConfig(true)">
-              保存自动保存设置
-            </van-button>
-          </div>
-
-          <div class="setting-tip">
-            <strong>功能说明：</strong><br/>
-            1. 开启后，进入「内业核查」或「外业核查」页面时，系统将在后台自动定时保存最新评分与打X核查状态到数据库。<br/>
-            2. 默认时间间隔为 <strong>5 分钟</strong>，可根据实际网络环境与作业习惯自行调整。<br/>
-            3. 关闭后，核查页面顶部将提示手动保存，不再执行定时后台保存。
-          </div>
-        </van-cell-group>
-      </van-tab>
-
       <!-- ================= 标签页 2：权限设置（管理员专享） ================= -->
       <van-tab title="权限设置" v-if="isAdmin">
         <!-- 账号新增区 -->
@@ -196,9 +160,7 @@ const router = useRouter();
 const activeTab = ref(0);
 const activeCollapse = ref([]);
 
-const AUTO_SAVE_KEY = 'auto_save_settings';
-const autoSaveEnabled = ref(false);
-const autoSaveInterval = ref('5');
+
 
 const sourcePath = ref('G:\\全椒县二轮延包\\全椒县县级验收管理平台\\sources\\341124100');
 const loading = ref(false);
@@ -222,6 +184,7 @@ const PERM_MODULES = [
       { key: 'waiye_save',        label: '保存核查状态' },
       { key: 'waiye_export_att8', label: '导出附件8（外业核查表）' },
       { key: 'waiye_export_att9', label: '导出附件9（县级核查表）' },
+      { key: 'waiye_inquiry',     label: '现场问询填报' },
     ]
   },
   {
@@ -250,9 +213,14 @@ const PERM_MODULES = [
     ]
   },
   {
-    title: '六、系统设置',
+    title: '六、附件导出',
     items: [
-      { key: 'settings_autosave', label: '自动保存配置' },
+      { key: 'batch_export', label: '附件一键批量导出' },
+    ]
+  },
+  {
+    title: '七、系统设置',
+    items: [
       { key: 'settings_security', label: '安全设置（修改密码）' },
       { key: 'settings_import',   label: '全量数据入库' },
     ]
@@ -272,15 +240,6 @@ const newPassword = ref('');
 const confirmPassword = ref('');
 
 onMounted(async () => {
-  try {
-    const raw = localStorage.getItem(AUTO_SAVE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      autoSaveEnabled.value = parsed.enabled === true;
-      autoSaveInterval.value = String(parsed.interval || 5);
-    }
-  } catch (e) {}
-
   if (isAdmin.value) {
     await fetchUsers();
   }
@@ -293,21 +252,6 @@ const fetchUsers = async () => {
       usersList.value = res.data.users;
     }
   } catch (e) {}
-};
-
-// ── 自动保存 ─────────────────────────────────────────────────────────────
-const onAutoSaveToggle = () => saveAutoSaveConfig(false);
-
-const saveAutoSaveConfig = (showMsg = true) => {
-  let interval = parseInt(autoSaveInterval.value);
-  if (isNaN(interval) || interval <= 0) interval = 5;
-  localStorage.setItem(AUTO_SAVE_KEY, JSON.stringify({
-    enabled: autoSaveEnabled.value,
-    interval
-  }));
-  if (showMsg) {
-    showToast(autoSaveEnabled.value ? `设置已保存：每 ${interval} 分钟自动保存一次` : '已关闭自动保存');
-  }
 };
 
 // ── 权限设置 ─────────────────────────────────────────────────────────────

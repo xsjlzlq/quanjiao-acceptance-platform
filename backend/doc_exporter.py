@@ -964,7 +964,8 @@ def export_waiye_att9(samples_rows):
         for idx, item in enumerate(group_stats):
             r_idx = idx + 3
             if r_idx > 12:
-                t.Rows(12).Select()
+                t.Cell(r_idx - 1, 1).Select()
+                word.Selection.SelectRow()
                 word.Selection.InsertRowsBelow(1)
                 
             t_avg = township_avg.get(item["township"], {"prog": 20.0, "effect": 10.0})

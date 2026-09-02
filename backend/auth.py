@@ -60,6 +60,7 @@ DEFAULT_PERMS = {
     "waiye_save": True,
     "waiye_export_att8": True,
     "waiye_export_att9": True,
+    "waiye_inquiry": True,
     # 三、内业核查
     "neiye_view": True,
     "neiye_save": True,
@@ -73,8 +74,9 @@ DEFAULT_PERMS = {
     "rectify_view": True,
     "rectify_export_att12": True,
     "rectify_export_att13": True,
+    # 附件一键导出
+    "batch_export": True,
     # 六、系统设置
-    "settings_autosave": True,
     "settings_security": True,
     "settings_import": True,
 }

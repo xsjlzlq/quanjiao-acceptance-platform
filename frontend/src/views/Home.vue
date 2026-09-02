@@ -46,6 +46,12 @@
           text="自查整改"
           to="/rectify"
         />
+        <van-grid-item
+          v-if="hasModulePerm('export')"
+          icon="down"
+          text="附件导出"
+          to="/export"
+        />
       </van-grid>
     </div>
   </div>
@@ -65,12 +71,13 @@ const hasModulePerm = (mod) => {
   if (role === 'admin') return true;
 
   const MOD_PERMS = {
-    settings: ['settings_autosave', 'settings_security', 'settings_import'],
+    settings: ['settings_security', 'settings_import'],
     tasks:    ['tasks_sample', 'tasks_clear', 'tasks_export_att4', 'tasks_export_att5'],
-    waiye:    ['waiye_check', 'waiye_save', 'waiye_export_att8', 'waiye_export_att9'],
+    waiye:    ['waiye_check', 'waiye_save', 'waiye_export_att8', 'waiye_export_att9', 'waiye_inquiry'],
     neiye:    ['neiye_view', 'neiye_save', 'neiye_export_att6', 'neiye_export_att7'],
     score:    ['score_view', 'score_export_att10', 'score_export_att11'],
     rectify:  ['rectify_view', 'rectify_export_att12', 'rectify_export_att13'],
+    export:   ['batch_export'],
   };
 
   const keys = MOD_PERMS[mod] || [];
