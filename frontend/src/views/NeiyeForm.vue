@@ -79,7 +79,7 @@
         <van-cell-group inset title="1. 延包方案与分工 (2分)" style="margin-top: 10px;">
           <van-checkbox-group v-model="form.mech_1">
             <van-cell title="未制定方案 (扣2分)" clickable @click="toggle('mech_1', '未制定方案')">
-              <template #right-icon><van-checkbox name="未制定方案" @click.stop /></template>
+              <template #right-icon><van-checkbox name="未制定方案" @click.stop.prevent="toggle('mech_1', '未制定方案')" /></template>
             </van-cell>
             <!-- 凭证上传区: 未制定方案 -->
             <div v-if="form.mech_1 && form.mech_1.includes('未制定方案')" class="evidence-box">
@@ -99,7 +99,7 @@
               </div>
             </div>
             <van-cell title="直接套用上级方案 (扣2分)" clickable @click="toggle('mech_1', '直接套用上级方案')">
-              <template #right-icon><van-checkbox name="直接套用上级方案" @click.stop /></template>
+              <template #right-icon><van-checkbox name="直接套用上级方案" @click.stop.prevent="toggle('mech_1', '直接套用上级方案')" /></template>
             </van-cell>
             <!-- 凭证上传区: 直接套用上级方案 -->
             <div v-if="form.mech_1 && form.mech_1.includes('直接套用上级方案')" class="evidence-box">
@@ -118,28 +118,8 @@
                 </div>
               </div>
             </div>
-            <van-cell title="分工不明确 (扣2分)" clickable @click="toggle('mech_1', '分工不明确')">
-              <template #right-icon><van-checkbox name="分工不明确" @click.stop /></template>
-            </van-cell>
-            <!-- 凭证上传区: 分工不明确 -->
-            <div v-if="form.mech_1 && form.mech_1.includes('分工不明确')" class="evidence-box">
-              <div class="evidence-header">
-                <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
-                <div class="uploader-btns">
-                  <van-uploader :after-read="(f) => onUploadEvidence(f, '分工不明确')" accept="image/*">
-                    <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
-                  </van-uploader>
-                </div>
-              </div>
-              <div v-if="getEvidenceList('分工不明确').length > 0" class="evidence-imgs">
-                <div v-for="(img, idx) in getEvidenceList('分工不明确')" :key="idx" class="img-thumb">
-                  <img :src="img.url" @click="previewEvidence(img.url)" />
-                  <span class="del-btn" @click.stop.prevent="removeEvidence('分工不明确', idx)">×</span>
-                </div>
-              </div>
-            </div>
             <van-cell title="制定程序不合法 (扣2分)" clickable @click="toggle('mech_1', '制定程序不合法')">
-              <template #right-icon><van-checkbox name="制定程序不合法" @click.stop /></template>
+              <template #right-icon><van-checkbox name="制定程序不合法" @click.stop.prevent="toggle('mech_1', '制定程序不合法')" /></template>
             </van-cell>
             <!-- 凭证上传区: 制定程序不合法 -->
             <div v-if="form.mech_1 && form.mech_1.includes('制定程序不合法')" class="evidence-box">
@@ -165,7 +145,7 @@
         <van-cell-group inset title="2. 经费保障 (10分)" style="margin-top: 10px;">
           <van-checkbox-group v-model="form.mech_2">
             <van-cell title="支付不规范 (扣4分)" clickable @click="toggle('mech_2', '支付不规范')">
-              <template #right-icon><van-checkbox name="支付不规范" @click.stop /></template>
+              <template #right-icon><van-checkbox name="支付不规范" @click.stop.prevent="toggle('mech_2', '支付不规范')" /></template>
             </van-cell>
             <!-- 凭证上传区: 支付不规范 -->
             <div v-if="form.mech_2 && form.mech_2.includes('支付不规范')" class="evidence-box">
@@ -185,7 +165,7 @@
               </div>
             </div>
             <van-cell title="支付不及时 (扣4分)" clickable @click="toggle('mech_2', '支付不及时')">
-              <template #right-icon><van-checkbox name="支付不及时" @click.stop /></template>
+              <template #right-icon><van-checkbox name="支付不及时" @click.stop.prevent="toggle('mech_2', '支付不及时')" /></template>
             </van-cell>
             <!-- 凭证上传区: 支付不及时 -->
             <div v-if="form.mech_2 && form.mech_2.includes('支付不及时')" class="evidence-box">
@@ -205,7 +185,7 @@
               </div>
             </div>
             <van-cell title="经费没有县级兜底 (扣2分)" clickable @click="toggle('mech_2', '经费没有县级兜底')">
-              <template #right-icon><van-checkbox name="经费没有县级兜底" @click.stop /></template>
+              <template #right-icon><van-checkbox name="经费没有县级兜底" @click.stop.prevent="toggle('mech_2', '经费没有县级兜底')" /></template>
             </van-cell>
             <!-- 凭证上传区: 经费没有县级兜底 -->
             <div v-if="form.mech_2 && form.mech_2.includes('经费没有县级兜底')" class="evidence-box">
@@ -231,7 +211,7 @@
         <van-cell-group inset title="3. 宣传 (2分)" style="margin-top: 10px;">
           <van-checkbox-group v-model="form.mech_3">
             <van-cell title="没有宣传材料 (扣2分)" clickable @click="toggle('mech_3', '没有宣传材料')">
-              <template #right-icon><van-checkbox name="没有宣传材料" @click.stop /></template>
+              <template #right-icon><van-checkbox name="没有宣传材料" @click.stop.prevent="toggle('mech_3', '没有宣传材料')" /></template>
             </van-cell>
             <!-- 凭证上传区: 没有宣传材料 -->
             <div v-if="form.mech_3 && form.mech_3.includes('没有宣传材料')" class="evidence-box">
@@ -257,7 +237,7 @@
         <van-cell-group inset title="4. 培训 (1分)" style="margin-top: 10px;">
           <van-checkbox-group v-model="form.mech_4">
             <van-cell title="没有培训材料 (扣0.5分)" clickable @click="toggle('mech_4', '没有培训材料')">
-              <template #right-icon><van-checkbox name="没有培训材料" @click.stop /></template>
+              <template #right-icon><van-checkbox name="没有培训材料" @click.stop.prevent="toggle('mech_4', '没有培训材料')" /></template>
             </van-cell>
             <!-- 凭证上传区: 没有培训材料 -->
             <div v-if="form.mech_4 && form.mech_4.includes('没有培训材料')" class="evidence-box">
@@ -277,7 +257,7 @@
               </div>
             </div>
             <van-cell title="没有分批次培训 (扣0.5分)" clickable @click="toggle('mech_4', '没有分批次培训')">
-              <template #right-icon><van-checkbox name="没有分批次培训" @click.stop /></template>
+              <template #right-icon><van-checkbox name="没有分批次培训" @click.stop.prevent="toggle('mech_4', '没有分批次培训')" /></template>
             </van-cell>
             <!-- 凭证上传区: 没有分批次培训 -->
             <div v-if="form.mech_4 && form.mech_4.includes('没有分批次培训')" class="evidence-box">
@@ -297,7 +277,7 @@
               </div>
             </div>
             <van-cell title="培训材料不齐全 (扣0.5分)" clickable @click="toggle('mech_4', '培训材料不齐全')">
-              <template #right-icon><van-checkbox name="培训材料不齐全" @click.stop /></template>
+              <template #right-icon><van-checkbox name="培训材料不齐全" @click.stop.prevent="toggle('mech_4', '培训材料不齐全')" /></template>
             </van-cell>
             <!-- 凭证上传区: 培训材料不齐全 -->
             <div v-if="form.mech_4 && form.mech_4.includes('培训材料不齐全')" class="evidence-box">
@@ -317,7 +297,7 @@
               </div>
             </div>
             <van-cell title="培训未覆盖县乡村组 (扣0.5分)" clickable @click="toggle('mech_4', '培训未覆盖县乡村组')">
-              <template #right-icon><van-checkbox name="培训未覆盖县乡村组" @click.stop /></template>
+              <template #right-icon><van-checkbox name="培训未覆盖县乡村组" @click.stop.prevent="toggle('mech_4', '培训未覆盖县乡村组')" /></template>
             </van-cell>
             <!-- 凭证上传区: 培训未覆盖县乡村组 -->
             <div v-if="form.mech_4 && form.mech_4.includes('培训未覆盖县乡村组')" class="evidence-box">
@@ -348,7 +328,7 @@
           <van-cell-group inset title="1. 成立机构 (5分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.prog_1">
               <van-cell title="未召开会议 (扣5分)" clickable @click="toggle('prog_1', '未召开会议')">
-                <template #right-icon><van-checkbox name="未召开会议" @click.stop /></template>
+                <template #right-icon><van-checkbox name="未召开会议" @click.stop.prevent="toggle('prog_1', '未召开会议')" /></template>
               </van-cell>
             <!-- 凭证上传区: 未召开会议 -->
             <div v-if="form.prog_1 && form.prog_1.includes('未召开会议')" class="evidence-box">
@@ -368,7 +348,7 @@
               </div>
             </div>
               <van-cell title="未公示工作组名单 (扣5分)" clickable @click="toggle('prog_1', '未公示工作组名单')">
-                <template #right-icon><van-checkbox name="未公示工作组名单" @click.stop /></template>
+                <template #right-icon><van-checkbox name="未公示工作组名单" @click.stop.prevent="toggle('prog_1', '未公示工作组名单')" /></template>
               </van-cell>
             <!-- 凭证上传区: 未公示工作组名单 -->
             <div v-if="form.prog_1 && form.prog_1.includes('未公示工作组名单')" class="evidence-box">
@@ -387,28 +367,8 @@
                 </div>
               </div>
             </div>
-              <van-cell title="公示时间不足15天 (扣5分)" clickable @click="toggle('prog_1', '公示时间不足15天')">
-                <template #right-icon><van-checkbox name="公示时间不足15天" @click.stop /></template>
-              </van-cell>
-            <!-- 凭证上传区: 公示时间不足15天 -->
-            <div v-if="form.prog_1 && form.prog_1.includes('公示时间不足15天')" class="evidence-box">
-              <div class="evidence-header">
-                <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
-                <div class="uploader-btns">
-                  <van-uploader :after-read="(f) => onUploadEvidence(f, '公示时间不足15天')" accept="image/*">
-                    <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
-                  </van-uploader>
-                </div>
-              </div>
-              <div v-if="getEvidenceList('公示时间不足15天').length > 0" class="evidence-imgs">
-                <div v-for="(img, idx) in getEvidenceList('公示时间不足15天')" :key="idx" class="img-thumb">
-                  <img :src="img.url" @click="previewEvidence(img.url)" />
-                  <span class="del-btn" @click.stop.prevent="removeEvidence('公示时间不足15天', idx)">×</span>
-                </div>
-              </div>
-            </div>
-              <van-cell title="参会人数不足法定数量 (扣5分)" clickable @click="toggle('prog_1', '参会人数不足法定数量')">
-                <template #right-icon><van-checkbox name="参会人数不足法定数量" @click.stop /></template>
+            <van-cell title="参会人数不足法定数量 (扣5分)" clickable @click="toggle('prog_1', '参会人数不足法定数量')">
+                <template #right-icon><van-checkbox name="参会人数不足法定数量" @click.stop.prevent="toggle('prog_1', '参会人数不足法定数量')" /></template>
               </van-cell>
             <!-- 凭证上传区: 参会人数不足法定数量 -->
             <div v-if="form.prog_1 && form.prog_1.includes('参会人数不足法定数量')" class="evidence-box">
@@ -434,7 +394,7 @@
           <van-cell-group inset title="2. 摸底核实 (5分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.prog_2">
               <van-cell title="没有进行摸底" clickable @click="toggle('prog_2', '没有进行摸底')">
-                <template #right-icon><van-checkbox name="没有进行摸底" @click.stop /></template>
+                <template #right-icon><van-checkbox name="没有进行摸底" @click.stop.prevent="toggle('prog_2', '没有进行摸底')" /></template>
               </van-cell>
             <!-- 凭证上传区: 没有进行摸底 -->
             <div v-if="form.prog_2 && form.prog_2.includes('没有进行摸底')" class="evidence-box">
@@ -454,7 +414,7 @@
               </div>
             </div>
               <van-cell title="摸底表农户未签署" clickable @click="toggle('prog_2', '摸底表农户未签署')">
-                <template #right-icon><van-checkbox name="摸底表农户未签署" @click.stop /></template>
+                <template #right-icon><van-checkbox name="摸底表农户未签署" @click.stop.prevent="toggle('prog_2', '摸底表农户未签署')" /></template>
               </van-cell>
             <!-- 凭证上传区: 摸底表农户未签署 -->
             <div v-if="form.prog_2 && form.prog_2.includes('摸底表农户未签署')" class="evidence-box">
@@ -474,7 +434,7 @@
               </div>
             </div>
               <van-cell title="摸底表中没有表达延包意愿" clickable @click="toggle('prog_2', '摸底表中没有表达延包意愿')">
-                <template #right-icon><van-checkbox name="摸底表中没有表达延包意愿" @click.stop /></template>
+                <template #right-icon><van-checkbox name="摸底表中没有表达延包意愿" @click.stop.prevent="toggle('prog_2', '摸底表中没有表达延包意愿')" /></template>
               </van-cell>
             <!-- 凭证上传区: 摸底表中没有表达延包意愿 -->
             <div v-if="form.prog_2 && form.prog_2.includes('摸底表中没有表达延包意愿')" class="evidence-box">
@@ -494,7 +454,7 @@
               </div>
             </div>
               <van-cell title="摸底表其它签署不齐全" clickable @click="toggle('prog_2', '摸底表其它签署不齐全')">
-                <template #right-icon><van-checkbox name="摸底表其它签署不齐全" @click.stop /></template>
+                <template #right-icon><van-checkbox name="摸底表其它签署不齐全" @click.stop.prevent="toggle('prog_2', '摸底表其它签署不齐全')" /></template>
               </van-cell>
             <!-- 凭证上传区: 摸底表其它签署不齐全 -->
             <div v-if="form.prog_2 && form.prog_2.includes('摸底表其它签署不齐全')" class="evidence-box">
@@ -514,7 +474,7 @@
               </div>
             </div>
               <van-cell title="特殊人员摸底不清或未统计" clickable @click="toggle('prog_2', '特殊人员摸底不清或未统计')">
-                <template #right-icon><van-checkbox name="特殊人员摸底不清或未统计" @click.stop /></template>
+                <template #right-icon><van-checkbox name="特殊人员摸底不清或未统计" @click.stop.prevent="toggle('prog_2', '特殊人员摸底不清或未统计')" /></template>
               </van-cell>
             <!-- 凭证上传区: 特殊人员摸底不清或未统计 -->
             <div v-if="form.prog_2 && form.prog_2.includes('特殊人员摸底不清或未统计')" class="evidence-box">
@@ -534,7 +494,7 @@
               </div>
             </div>
               <van-cell title="户变化未统计" clickable @click="toggle('prog_2', '户变化未统计')">
-                <template #right-icon><van-checkbox name="户变化未统计" @click.stop /></template>
+                <template #right-icon><van-checkbox name="户变化未统计" @click.stop.prevent="toggle('prog_2', '户变化未统计')" /></template>
               </van-cell>
             <!-- 凭证上传区: 户变化未统计 -->
             <div v-if="form.prog_2 && form.prog_2.includes('户变化未统计')" class="evidence-box">
@@ -554,7 +514,7 @@
               </div>
             </div>
               <van-cell title="矛盾纠纷未登记或处理不当" clickable @click="toggle('prog_2', '矛盾纠纷未登记或处理不当')">
-                <template #right-icon><van-checkbox name="矛盾纠纷未登记或处理不当" @click.stop /></template>
+                <template #right-icon><van-checkbox name="矛盾纠纷未登记或处理不当" @click.stop.prevent="toggle('prog_2', '矛盾纠纷未登记或处理不当')" /></template>
               </van-cell>
             <!-- 凭证上传区: 矛盾纠纷未登记或处理不当 -->
             <div v-if="form.prog_2 && form.prog_2.includes('矛盾纠纷未登记或处理不当')" class="evidence-box">
@@ -574,7 +534,7 @@
               </div>
             </div>
               <van-cell title="承包地变化未摸清" clickable @click="toggle('prog_2', '承包地变化未摸清')">
-                <template #right-icon><van-checkbox name="承包地变化未摸清" @click.stop /></template>
+                <template #right-icon><van-checkbox name="承包地变化未摸清" @click.stop.prevent="toggle('prog_2', '承包地变化未摸清')" /></template>
               </van-cell>
             <!-- 凭证上传区: 承包地变化未摸清 -->
             <div v-if="form.prog_2 && form.prog_2.includes('承包地变化未摸清')" class="evidence-box">
@@ -594,7 +554,7 @@
               </div>
             </div>
               <van-cell title="没有应确尽确" clickable @click="toggle('prog_2', '没有应确尽确')">
-                <template #right-icon><van-checkbox name="没有应确尽确" @click.stop /></template>
+                <template #right-icon><van-checkbox name="没有应确尽确" @click.stop.prevent="toggle('prog_2', '没有应确尽确')" /></template>
               </van-cell>
             <!-- 凭证上传区: 没有应确尽确 -->
             <div v-if="form.prog_2 && form.prog_2.includes('没有应确尽确')" class="evidence-box">
@@ -620,7 +580,7 @@
           <van-cell-group inset title="3. 制定方案 (5分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.prog_3">
               <van-cell title="没有延包方案 (扣5分)" clickable @click="toggle('prog_3', '没有延包方案')">
-                <template #right-icon><van-checkbox name="没有延包方案" @click.stop /></template>
+                <template #right-icon><van-checkbox name="没有延包方案" @click.stop.prevent="toggle('prog_3', '没有延包方案')" /></template>
               </van-cell>
             <!-- 凭证上传区: 没有延包方案 -->
             <div v-if="form.prog_3 && form.prog_3.includes('没有延包方案')" class="evidence-box">
@@ -640,7 +600,7 @@
               </div>
             </div>
               <van-cell title="延包方案未上报 (扣5分)" clickable @click="toggle('prog_3', '延包方案未上报')">
-                <template #right-icon><van-checkbox name="延包方案未上报" @click.stop /></template>
+                <template #right-icon><van-checkbox name="延包方案未上报" @click.stop.prevent="toggle('prog_3', '延包方案未上报')" /></template>
               </van-cell>
             <!-- 凭证上传区: 延包方案未上报 -->
             <div v-if="form.prog_3 && form.prog_3.includes('延包方案未上报')" class="evidence-box">
@@ -660,7 +620,7 @@
               </div>
             </div>
               <van-cell title="延包方案未公示 (扣5分)" clickable @click="toggle('prog_3', '延包方案未公示')">
-                <template #right-icon><van-checkbox name="延包方案未公示" @click.stop /></template>
+                <template #right-icon><van-checkbox name="延包方案未公示" @click.stop.prevent="toggle('prog_3', '延包方案未公示')" /></template>
               </van-cell>
             <!-- 凭证上传区: 延包方案未公示 -->
             <div v-if="form.prog_3 && form.prog_3.includes('延包方案未公示')" class="evidence-box">
@@ -680,7 +640,7 @@
               </div>
             </div>
               <van-cell title="未召开会议讨论延包方案 (扣5分)" clickable @click="toggle('prog_3', '未召开会议讨论延包方案')">
-                <template #right-icon><van-checkbox name="未召开会议讨论延包方案" @click.stop /></template>
+                <template #right-icon><van-checkbox name="未召开会议讨论延包方案" @click.stop.prevent="toggle('prog_3', '未召开会议讨论延包方案')" /></template>
               </van-cell>
             <!-- 凭证上传区: 未召开会议讨论延包方案 -->
             <div v-if="form.prog_3 && form.prog_3.includes('未召开会议讨论延包方案')" class="evidence-box">
@@ -706,7 +666,7 @@
           <van-cell-group inset title="4. 调查公示 (2分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.prog_4">
               <van-cell title="没有公示材料 (直接扣2分)" clickable @click="toggle('prog_4', '没有公示材料')">
-                <template #right-icon><van-checkbox name="没有公示材料" @click.stop /></template>
+                <template #right-icon><van-checkbox name="没有公示材料" @click.stop.prevent="toggle('prog_4', '没有公示材料')" /></template>
               </van-cell>
             <!-- 凭证上传区: 没有公示材料 -->
             <div v-if="form.prog_4 && form.prog_4.includes('没有公示材料')" class="evidence-box">
@@ -725,28 +685,28 @@
                 </div>
               </div>
             </div>
-              <van-cell title="没有公示或不足15天 (直接扣2分)" clickable @click="toggle('prog_4', '没有公示或不足15天')">
-                <template #right-icon><van-checkbox name="没有公示或不足15天" @click.stop /></template>
+              <van-cell title="公示不足15天 (直接扣2分)" clickable @click="toggle('prog_4', '公示不足15天')">
+                <template #right-icon><van-checkbox name="公示不足15天" @click.stop.prevent="toggle('prog_4', '公示不足15天')" /></template>
               </van-cell>
-            <!-- 凭证上传区: 没有公示或不足15天 -->
-            <div v-if="form.prog_4 && form.prog_4.includes('没有公示或不足15天')" class="evidence-box">
+            <!-- 凭证上传区: 公示不足15天 -->
+            <div v-if="form.prog_4 && (form.prog_4.includes('公示不足15天') || form.prog_4.includes('没有公示或不足15天'))" class="evidence-box">
               <div class="evidence-header">
                 <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
                 <div class="uploader-btns">
-                  <van-uploader :after-read="(f) => onUploadEvidence(f, '没有公示或不足15天')" accept="image/*">
+                  <van-uploader :after-read="(f) => onUploadEvidence(f, '公示不足15天')" accept="image/*">
                     <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
                   </van-uploader>
                 </div>
               </div>
-              <div v-if="getEvidenceList('没有公示或不足15天').length > 0" class="evidence-imgs">
-                <div v-for="(img, idx) in getEvidenceList('没有公示或不足15天')" :key="idx" class="img-thumb">
+              <div v-if="getEvidenceList('公示不足15天').length > 0 || getEvidenceList('没有公示或不足15天').length > 0" class="evidence-imgs">
+                <div v-for="(img, idx) in [...getEvidenceList('公示不足15天'), ...getEvidenceList('没有公示或不足15天')]" :key="idx" class="img-thumb">
                   <img :src="img.url" @click="previewEvidence(img.url)" />
-                  <span class="del-btn" @click.stop.prevent="removeEvidence('没有公示或不足15天', idx)">×</span>
+                  <span class="del-btn" @click.stop.prevent="removeEvidence('公示不足15天', idx)">×</span>
                 </div>
               </div>
             </div>
               <van-cell title="公示结果未确认" clickable @click="toggle('prog_4', '公示结果未确认')">
-                <template #right-icon><van-checkbox name="公示结果未确认" @click.stop /></template>
+                <template #right-icon><van-checkbox name="公示结果未确认" @click.stop.prevent="toggle('prog_4', '公示结果未确认')" /></template>
               </van-cell>
             <!-- 凭证上传区: 公示结果未确认 -->
             <div v-if="form.prog_4 && form.prog_4.includes('公示结果未确认')" class="evidence-box">
@@ -766,7 +726,7 @@
               </div>
             </div>
               <van-cell title="各类资料不齐全" clickable @click="toggle('prog_4', '各类资料不齐全')">
-                <template #right-icon><van-checkbox name="各类资料不齐全" @click.stop /></template>
+                <template #right-icon><van-checkbox name="各类资料不齐全" @click.stop.prevent="toggle('prog_4', '各类资料不齐全')" /></template>
               </van-cell>
             <!-- 凭证上传区: 各类资料不齐全 -->
             <div v-if="form.prog_4 && form.prog_4.includes('各类资料不齐全')" class="evidence-box">
@@ -786,7 +746,7 @@
               </div>
             </div>
               <van-cell title="各类资料制作粗糙" clickable @click="toggle('prog_4', '各类资料制作粗糙')">
-                <template #right-icon><van-checkbox name="各类资料制作粗糙" @click.stop /></template>
+                <template #right-icon><van-checkbox name="各类资料制作粗糙" @click.stop.prevent="toggle('prog_4', '各类资料制作粗糙')" /></template>
               </van-cell>
             <!-- 凭证上传区: 各类资料制作粗糙 -->
             <div v-if="form.prog_4 && form.prog_4.includes('各类资料制作粗糙')" class="evidence-box">
@@ -806,7 +766,7 @@
               </div>
             </div>
               <van-cell title="各类资料签署不规范" clickable @click="toggle('prog_4', '各类资料签署不规范')">
-                <template #right-icon><van-checkbox name="各类资料签署不规范" @click.stop /></template>
+                <template #right-icon><van-checkbox name="各类资料签署不规范" @click.stop.prevent="toggle('prog_4', '各类资料签署不规范')" /></template>
               </van-cell>
             <!-- 凭证上传区: 各类资料签署不规范 -->
             <div v-if="form.prog_4 && form.prog_4.includes('各类资料签署不规范')" class="evidence-box">
@@ -826,7 +786,7 @@
               </div>
             </div>
               <van-cell title="权属证明材料不齐全" clickable @click="toggle('prog_4', '权属证明材料不齐全')">
-                <template #right-icon><van-checkbox name="权属证明材料不齐全" @click.stop /></template>
+                <template #right-icon><van-checkbox name="权属证明材料不齐全" @click.stop.prevent="toggle('prog_4', '权属证明材料不齐全')" /></template>
               </van-cell>
             <!-- 凭证上传区: 权属证明材料不齐全 -->
             <div v-if="form.prog_4 && form.prog_4.includes('权属证明材料不齐全')" class="evidence-box">
@@ -846,7 +806,7 @@
               </div>
             </div>
               <van-cell title="其它证明材料不齐全" clickable @click="toggle('prog_4', '其它证明材料不齐全')">
-                <template #right-icon><van-checkbox name="其它证明材料不齐全" @click.stop /></template>
+                <template #right-icon><van-checkbox name="其它证明材料不齐全" @click.stop.prevent="toggle('prog_4', '其它证明材料不齐全')" /></template>
               </van-cell>
             <!-- 凭证上传区: 其它证明材料不齐全 -->
             <div v-if="form.prog_4 && form.prog_4.includes('其它证明材料不齐全')" class="evidence-box">
@@ -872,7 +832,7 @@
           <van-cell-group inset title="5. 签订合同 (3分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.prog_5">
               <van-cell title="合同版本格式不正确 (扣3分)" clickable @click="toggle('prog_5', '合同版本格式不正确')">
-                <template #right-icon><van-checkbox name="合同版本格式不正确" @click.stop /></template>
+                <template #right-icon><van-checkbox name="合同版本格式不正确" @click.stop.prevent="toggle('prog_5', '合同版本格式不正确')" /></template>
               </van-cell>
             <!-- 凭证上传区: 合同版本格式不正确 -->
             <div v-if="form.prog_5 && form.prog_5.includes('合同版本格式不正确')" class="evidence-box">
@@ -892,7 +852,7 @@
               </div>
             </div>
               <van-cell title="合同网签率未达到95% (扣3分)" clickable @click="toggle('prog_5', '合同网签率未达到95%')">
-                <template #right-icon><van-checkbox name="合同网签率未达到95%" @click.stop /></template>
+                <template #right-icon><van-checkbox name="合同网签率未达到95%" @click.stop.prevent="toggle('prog_5', '合同网签率未达到95%')" /></template>
               </van-cell>
             <!-- 凭证上传区: 合同网签率未达到95% -->
             <div v-if="form.prog_5 && form.prog_5.includes('合同网签率未达到95%')" class="evidence-box">
@@ -912,7 +872,7 @@
               </div>
             </div>
               <van-cell title="没有地块示意图 (扣3分)" clickable @click="toggle('prog_5', '没有地块示意图')">
-                <template #right-icon><van-checkbox name="没有地块示意图" @click.stop /></template>
+                <template #right-icon><van-checkbox name="没有地块示意图" @click.stop.prevent="toggle('prog_5', '没有地块示意图')" /></template>
               </van-cell>
             <!-- 凭证上传区: 没有地块示意图 -->
             <div v-if="form.prog_5 && form.prog_5.includes('没有地块示意图')" class="evidence-box">
@@ -938,7 +898,7 @@
           <van-cell-group inset title="6. 完善证书 (5分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.prog_6">
               <van-cell title="未进行信息共享 (扣5分)" clickable @click="toggle('prog_6', '未进行信息共享')">
-                <template #right-icon><van-checkbox name="未进行信息共享" @click.stop /></template>
+                <template #right-icon><van-checkbox name="未进行信息共享" @click.stop.prevent="toggle('prog_6', '未进行信息共享')" /></template>
               </van-cell>
             <!-- 凭证上传区: 未进行信息共享 -->
             <div v-if="form.prog_6 && form.prog_6.includes('未进行信息共享')" class="evidence-box">
@@ -958,7 +918,7 @@
               </div>
             </div>
               <van-cell title="未与不动产登记部门有序衔接 (扣5分)" clickable @click="toggle('prog_6', '未与不动产登记部门有序衔接')">
-                <template #right-icon><van-checkbox name="未与不动产登记部门有序衔接" @click.stop /></template>
+                <template #right-icon><van-checkbox name="未与不动产登记部门有序衔接" @click.stop.prevent="toggle('prog_6', '未与不动产登记部门有序衔接')" /></template>
               </van-cell>
             <!-- 凭证上传区: 未与不动产登记部门有序衔接 -->
             <div v-if="form.prog_6 && form.prog_6.includes('未与不动产登记部门有序衔接')" class="evidence-box">
@@ -984,7 +944,7 @@
           <van-cell-group inset title="7. 资料归档 (5分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.prog_7">
               <van-cell title="档案整理第三方无涉密档案整理资质 (扣5分)" clickable @click="toggle('prog_7', '档案整理第三方无涉密档案整理资质')">
-                <template #right-icon><van-checkbox name="档案整理第三方无涉密档案整理资质" @click.stop /></template>
+                <template #right-icon><van-checkbox name="档案整理第三方无涉密档案整理资质" @click.stop.prevent="toggle('prog_7', '档案整理第三方无涉密档案整理资质')" /></template>
               </van-cell>
             <!-- 凭证上传区: 档案整理第三方无涉密档案整理资质 -->
             <div v-if="form.prog_7 && form.prog_7.includes('档案整理第三方无涉密档案整理资质')" class="evidence-box">
@@ -1003,43 +963,103 @@
                 </div>
               </div>
             </div>
-              <van-cell title="没有进行档案验收 (扣5分)" clickable @click="toggle('prog_7', '没有进行档案验收')">
-                <template #right-icon><van-checkbox name="没有进行档案验收" @click.stop /></template>
+              <van-cell title="档案资料收集不齐全 (扣5分)" clickable @click="toggle('prog_7', '档案资料收集不齐全')">
+                <template #right-icon><van-checkbox name="档案资料收集不齐全" @click.stop.prevent="toggle('prog_7', '档案资料收集不齐全')" /></template>
               </van-cell>
-            <!-- 凭证上传区: 没有进行档案验收 -->
-            <div v-if="form.prog_7 && form.prog_7.includes('没有进行档案验收')" class="evidence-box">
+            <!-- 凭证上传区: 档案资料收集不齐全 -->
+            <div v-if="form.prog_7 && form.prog_7.includes('档案资料收集不齐全')" class="evidence-box">
               <div class="evidence-header">
                 <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
                 <div class="uploader-btns">
-                  <van-uploader :after-read="(f) => onUploadEvidence(f, '没有进行档案验收')" accept="image/*">
+                  <van-uploader :after-read="(f) => onUploadEvidence(f, '档案资料收集不齐全')" accept="image/*">
                     <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
                   </van-uploader>
                 </div>
               </div>
-              <div v-if="getEvidenceList('没有进行档案验收').length > 0" class="evidence-imgs">
-                <div v-for="(img, idx) in getEvidenceList('没有进行档案验收')" :key="idx" class="img-thumb">
+              <div v-if="getEvidenceList('档案资料收集不齐全').length > 0" class="evidence-imgs">
+                <div v-for="(img, idx) in getEvidenceList('档案资料收集不齐全')" :key="idx" class="img-thumb">
                   <img :src="img.url" @click="previewEvidence(img.url)" />
-                  <span class="del-btn" @click.stop.prevent="removeEvidence('没有进行档案验收', idx)">×</span>
+                  <span class="del-btn" @click.stop.prevent="removeEvidence('档案资料收集不齐全', idx)">×</span>
                 </div>
               </div>
             </div>
-              <van-cell title="档案验收不符合相关标准 (扣5分)" clickable @click="toggle('prog_7', '档案验收不符合相关标准')">
-                <template #right-icon><van-checkbox name="档案验收不符合相关标准" @click.stop /></template>
+              <van-cell title="档案分类不符合要求 (扣5分)" clickable @click="toggle('prog_7', '档案分类不符合要求')">
+                <template #right-icon><van-checkbox name="档案分类不符合要求" @click.stop.prevent="toggle('prog_7', '档案分类不符合要求')" /></template>
               </van-cell>
-            <!-- 凭证上传区: 档案验收不符合相关标准 -->
-            <div v-if="form.prog_7 && form.prog_7.includes('档案验收不符合相关标准')" class="evidence-box">
+            <!-- 凭证上传区: 档案分类不符合要求 -->
+            <div v-if="form.prog_7 && form.prog_7.includes('档案分类不符合要求')" class="evidence-box">
               <div class="evidence-header">
                 <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
                 <div class="uploader-btns">
-                  <van-uploader :after-read="(f) => onUploadEvidence(f, '档案验收不符合相关标准')" accept="image/*">
+                  <van-uploader :after-read="(f) => onUploadEvidence(f, '档案分类不符合要求')" accept="image/*">
                     <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
                   </van-uploader>
                 </div>
               </div>
-              <div v-if="getEvidenceList('档案验收不符合相关标准').length > 0" class="evidence-imgs">
-                <div v-for="(img, idx) in getEvidenceList('档案验收不符合相关标准')" :key="idx" class="img-thumb">
+              <div v-if="getEvidenceList('档案分类不符合要求').length > 0" class="evidence-imgs">
+                <div v-for="(img, idx) in getEvidenceList('档案分类不符合要求')" :key="idx" class="img-thumb">
                   <img :src="img.url" @click="previewEvidence(img.url)" />
-                  <span class="del-btn" @click.stop.prevent="removeEvidence('档案验收不符合相关标准', idx)">×</span>
+                  <span class="del-btn" @click.stop.prevent="removeEvidence('档案分类不符合要求', idx)">×</span>
+                </div>
+              </div>
+            </div>
+              <van-cell title="档号与归档章不一致 (扣5分)" clickable @click="toggle('prog_7', '档号与归档章不一致')">
+                <template #right-icon><van-checkbox name="档号与归档章不一致" @click.stop.prevent="toggle('prog_7', '档号与归档章不一致')" /></template>
+              </van-cell>
+            <!-- 凭证上传区: 档号与归档章不一致 -->
+            <div v-if="form.prog_7 && form.prog_7.includes('档号与归档章不一致')" class="evidence-box">
+              <div class="evidence-header">
+                <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
+                <div class="uploader-btns">
+                  <van-uploader :after-read="(f) => onUploadEvidence(f, '档号与归档章不一致')" accept="image/*">
+                    <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
+                  </van-uploader>
+                </div>
+              </div>
+              <div v-if="getEvidenceList('档号与归档章不一致').length > 0" class="evidence-imgs">
+                <div v-for="(img, idx) in getEvidenceList('档号与归档章不一致')" :key="idx" class="img-thumb">
+                  <img :src="img.url" @click="previewEvidence(img.url)" />
+                  <span class="del-btn" @click.stop.prevent="removeEvidence('档号与归档章不一致', idx)">×</span>
+                </div>
+              </div>
+            </div>
+              <van-cell title="档案变数字化瑕疵 (扣5分)" clickable @click="toggle('prog_7', '档案变数字化瑕疵')">
+                <template #right-icon><van-checkbox name="档案变数字化瑕疵" @click.stop.prevent="toggle('prog_7', '档案变数字化瑕疵')" /></template>
+              </van-cell>
+            <!-- 凭证上传区: 档案变数字化瑕疵 -->
+            <div v-if="form.prog_7 && form.prog_7.includes('档案变数字化瑕疵')" class="evidence-box">
+              <div class="evidence-header">
+                <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
+                <div class="uploader-btns">
+                  <van-uploader :after-read="(f) => onUploadEvidence(f, '档案变数字化瑕疵')" accept="image/*">
+                    <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
+                  </van-uploader>
+                </div>
+              </div>
+              <div v-if="getEvidenceList('档案变数字化瑕疵').length > 0" class="evidence-imgs">
+                <div v-for="(img, idx) in getEvidenceList('档案变数字化瑕疵')" :key="idx" class="img-thumb">
+                  <img :src="img.url" @click="previewEvidence(img.url)" />
+                  <span class="del-btn" @click.stop.prevent="removeEvidence('档案变数字化瑕疵', idx)">×</span>
+                </div>
+              </div>
+            </div>
+              <van-cell title="“一户一档”姓名著录错误 (扣5分)" clickable @click="toggle('prog_7', '“一户一档”姓名著录错误')">
+                <template #right-icon><van-checkbox name="“一户一档”姓名著录错误" @click.stop.prevent="toggle('prog_7', '“一户一档”姓名著录错误')" /></template>
+              </van-cell>
+            <!-- 凭证上传区: “一户一档”姓名著录错误 -->
+            <div v-if="form.prog_7 && form.prog_7.includes('“一户一档”姓名著录错误')" class="evidence-box">
+              <div class="evidence-header">
+                <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
+                <div class="uploader-btns">
+                  <van-uploader :after-read="(f) => onUploadEvidence(f, '“一户一档”姓名著录错误')" accept="image/*">
+                    <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
+                  </van-uploader>
+                </div>
+              </div>
+              <div v-if="getEvidenceList('“一户一档”姓名著录错误').length > 0" class="evidence-imgs">
+                <div v-for="(img, idx) in getEvidenceList('“一户一档”姓名著录错误')" :key="idx" class="img-thumb">
+                  <img :src="img.url" @click="previewEvidence(img.url)" />
+                  <span class="del-btn" @click.stop.prevent="removeEvidence('“一户一档”姓名著录错误', idx)">×</span>
                 </div>
               </div>
             </div>
@@ -1053,7 +1073,7 @@
           <van-cell-group inset title="1. 大稳定、小调整 (3分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.policy_1">
               <van-cell title="小调整比率过大或手续不齐全 (扣1分)" clickable @click="toggle('policy_1', '小调整比率过大或手续不齐全')">
-                <template #right-icon><van-checkbox name="小调整比率过大或手续不齐全" @click.stop /></template>
+                <template #right-icon><van-checkbox name="小调整比率过大或手续不齐全" @click.stop.prevent="toggle('policy_1', '小调整比率过大或手续不齐全')" /></template>
               </van-cell>
             <!-- 凭证上传区: 小调整比率过大或手续不齐全 -->
             <div v-if="form.policy_1 && form.policy_1.includes('小调整比率过大或手续不齐全')" class="evidence-box">
@@ -1073,7 +1093,7 @@
               </div>
             </div>
               <van-cell title="打乱重分 (扣1分)" clickable @click="toggle('policy_1', '打乱重分')">
-                <template #right-icon><van-checkbox name="打乱重分" @click.stop /></template>
+                <template #right-icon><van-checkbox name="打乱重分" @click.stop.prevent="toggle('policy_1', '打乱重分')" /></template>
               </van-cell>
             <!-- 凭证上传区: 打乱重分 -->
             <div v-if="form.policy_1 && form.policy_1.includes('打乱重分')" class="evidence-box">
@@ -1093,7 +1113,7 @@
               </div>
             </div>
               <van-cell title="违法调整或收回承包地 (扣1分)" clickable @click="toggle('policy_1', '违法调整或收回承包地')">
-                <template #right-icon><van-checkbox name="违法调整或收回承包地" @click.stop /></template>
+                <template #right-icon><van-checkbox name="违法调整或收回承包地" @click.stop.prevent="toggle('policy_1', '违法调整或收回承包地')" /></template>
               </van-cell>
             <!-- 凭证上传区: 违法调整或收回承包地 -->
             <div v-if="form.policy_1 && form.policy_1.includes('违法调整或收回承包地')" class="evidence-box">
@@ -1223,7 +1243,7 @@
           <van-cell-group inset title="4. 严格机动地和新增耕地管理 (3分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.policy_4">
               <van-cell title="机动地、新增耕地处置不当 (扣0.5分)" clickable @click="toggle('policy_4', '机动地、新增耕地处置不当')">
-                <template #right-icon><van-checkbox name="机动地、新增耕地处置不当" @click.stop /></template>
+                <template #right-icon><van-checkbox name="机动地、新增耕地处置不当" @click.stop.prevent="toggle('policy_4', '机动地、新增耕地处置不当')" /></template>
               </van-cell>
             <!-- 凭证上传区: 机动地、新增耕地处置不当 -->
             <div v-if="form.policy_4 && form.policy_4.includes('机动地、新增耕地处置不当')" class="evidence-box">
@@ -1243,7 +1263,7 @@
               </div>
             </div>
               <van-cell title="机动地比率过高 (扣0.5分)" clickable @click="toggle('policy_4', '机动地比率过高')">
-                <template #right-icon><van-checkbox name="机动地比率过高" @click.stop /></template>
+                <template #right-icon><van-checkbox name="机动地比率过高" @click.stop.prevent="toggle('policy_4', '机动地比率过高')" /></template>
               </van-cell>
             <!-- 凭证上传区: 机动地比率过高 -->
             <div v-if="form.policy_4 && form.policy_4.includes('机动地比率过高')" class="evidence-box">
@@ -1269,7 +1289,7 @@
           <van-cell-group inset title="5. 从严掌握确权确股不确地 (3分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.policy_5">
               <van-cell title="违背农户意愿强行推进 (扣0.5分)" clickable @click="toggle('policy_5', '违背农户意愿强行推进')">
-                <template #right-icon><van-checkbox name="违背农户意愿强行推进" @click.stop /></template>
+                <template #right-icon><van-checkbox name="违背农户意愿强行推进" @click.stop.prevent="toggle('policy_5', '违背农户意愿强行推进')" /></template>
               </van-cell>
             <!-- 凭证上传区: 违背农户意愿强行推进 -->
             <div v-if="form.policy_5 && form.policy_5.includes('违背农户意愿强行推进')" class="evidence-box">
@@ -1289,7 +1309,7 @@
               </div>
             </div>
               <van-cell title="确权确股不确地手续不齐全 (扣0.5分)" clickable @click="toggle('policy_5', '确权确股不确地手续不齐全')">
-                <template #right-icon><van-checkbox name="确权确股不确地手续不齐全" @click.stop /></template>
+                <template #right-icon><van-checkbox name="确权确股不确地手续不齐全" @click.stop.prevent="toggle('policy_5', '确权确股不确地手续不齐全')" /></template>
               </van-cell>
             <!-- 凭证上传区: 确权确股不确地手续不齐全 -->
             <div v-if="form.policy_5 && form.policy_5.includes('确权确股不确地手续不齐全')" class="evidence-box">
@@ -1318,7 +1338,7 @@
           <van-cell-group inset title="加强风险防范 (10分)" style="margin-top: 10px;">
             <van-checkbox-group v-model="form.effect_1">
               <van-cell title="未建立矛盾纠纷处置机制 (扣1分)" clickable @click="toggle('effect_1', '未建立矛盾纠纷处置机制')">
-                <template #right-icon><van-checkbox name="未建立矛盾纠纷处置机制" @click.stop /></template>
+                <template #right-icon><van-checkbox name="未建立矛盾纠纷处置机制" @click.stop.prevent="toggle('effect_1', '未建立矛盾纠纷处置机制')" /></template>
               </van-cell>
             <!-- 凭证上传区: 未建立矛盾纠纷处置机制 -->
             <div v-if="form.effect_1 && form.effect_1.includes('未建立矛盾纠纷处置机制')" class="evidence-box">
@@ -1338,7 +1358,7 @@
               </div>
             </div>
               <van-cell title="未建立舆情处置办法 (扣1分)" clickable @click="toggle('effect_1', '未建立舆情处置办法')">
-                <template #right-icon><van-checkbox name="未建立舆情处置办法" @click.stop /></template>
+                <template #right-icon><van-checkbox name="未建立舆情处置办法" @click.stop.prevent="toggle('effect_1', '未建立舆情处置办法')" /></template>
               </van-cell>
             <!-- 凭证上传区: 未建立舆情处置办法 -->
             <div v-if="form.effect_1 && form.effect_1.includes('未建立舆情处置办法')" class="evidence-box">
@@ -1358,7 +1378,7 @@
               </div>
             </div>
               <van-cell title="没有矛盾纠纷处理台账 (扣1分)" clickable @click="toggle('effect_1', '没有矛盾纠纷处理台账')">
-                <template #right-icon><van-checkbox name="没有矛盾纠纷处理台账" @click.stop /></template>
+                <template #right-icon><van-checkbox name="没有矛盾纠纷处理台账" @click.stop.prevent="toggle('effect_1', '没有矛盾纠纷处理台账')" /></template>
               </van-cell>
             <!-- 凭证上传区: 没有矛盾纠纷处理台账 -->
             <div v-if="form.effect_1 && form.effect_1.includes('没有矛盾纠纷处理台账')" class="evidence-box">
@@ -1467,7 +1487,7 @@ const silentAutoSave = async () => {
 onMounted(async () => {
   showLoadingToast({ message: '加载中...', forbidClick: true });
   try {
-    const res = await axios.get('/api/hierarchy');
+    const res = await axios.get('/api/neiye/townships');
     if (res.data.code === 200) {
       const townships = res.data.townships || [];
       const county = res.data.county;
@@ -1659,7 +1679,7 @@ const totalScore = computed(() => {
 
 const triggerDownload = (url) => {
   const link = document.createElement('a');
-  link.href = url;
+  link.href = encodeURI(decodeURI(url));
   link.setAttribute('download', '');
   document.body.appendChild(link);
   link.click();
@@ -1975,7 +1995,7 @@ const onExportAtt7 = async () => {
   showLoadingToast({ message: '正在汇总生成附件7得分表...', forbidClick: true });
   try {
     // auto save county state if county is active
-    if (selectedAreaCode.value === '341124') {
+    if (selectedAreaLevel.value === 'county') {
       await axios.post('/api/save_neiye', {
         qsdwdm: selectedAreaCode.value,
         qsdwmc: selectedAreaName.value,

@@ -5,7 +5,7 @@ import tempfile
 import uuid
 import zipfile
 from sqlalchemy import text
-from database import SessionLocal
+from database import SessionLocal, parse_qsdwdmb_hierarchy, get_base_dir
 
 from doc_exporter import (
     export_att4, export_att5, export_neiye_att6_township, export_neiye_att6_county,
@@ -24,42 +24,48 @@ def make_zip(source_dir, output_filename):
                 zipf.write(abs_path, rel_path)
 
 async def run_batch_export(level: str, township_code: str, township_name: str, attachments: list):
-    base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+    base_dir = get_base_dir()
     downloads_dir = os.path.join(base_dir, "backend", "downloads")
     
     tmp_uuid = uuid.uuid4().hex
-    tmp_dir = os.path.join(tempfile.gettempdir(), f"quanjiao_export_{tmp_uuid}")
+    tmp_dir = os.path.join(tempfile.gettempdir(), f"acceptance_export_{tmp_uuid}")
     os.makedirs(tmp_dir, exist_ok=True)
     
     zip_filename = ""
     
     try:
         async with SessionLocal() as session:
+            # 动态解析县级信息
+            res_h = await session.execute(text("SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm"))
+            county_info, _ = parse_qsdwdmb_hierarchy(res_h.fetchall())
+            county_code = county_info.get("code", "341124")
+            county_name = county_info.get("name", "全椒县")
+
             if level == "county":
-                export_path = os.path.join(tmp_dir, "全椒县县级自查验收附件")
+                export_path = os.path.join(tmp_dir, f"{county_name}县级自查验收附件")
                 os.makedirs(export_path, exist_ok=True)
-                zip_filename = "全椒县县级自查验收附件.zip"
+                zip_filename = f"{county_name}县级自查验收附件.zip"
                 
                 # 1. 内业核查资料
                 neiye_dir = os.path.join(export_path, "1.内业核查资料")
                 os.makedirs(neiye_dir, exist_ok=True)
                 
                 if "att6_county" in attachments:
-                    r1 = await session.execute(text("SELECT form_data FROM neiye_records WHERE qsdwdm = '341124'"))
+                    r1 = await session.execute(text("SELECT form_data FROM neiye_records WHERE qsdwdm = :c_code OR level = 'county'"), {"c_code": county_code})
                     row = r1.fetchone()
                     form_data = row[0] if (row and row[0]) else {}
                     await asyncio.to_thread(export_neiye_att6_county, form_data)
-                    src = os.path.join(downloads_dir, "附件6_全椒县县级自查内业组检查记录表（1_4）.doc")
+                    src = os.path.join(downloads_dir, f"附件6_{county_name}县级自查内业组检查记录表（1_4）.doc")
                     if os.path.exists(src):
-                        shutil.copy(src, os.path.join(neiye_dir, "附件6_全椒县县级自查内业组检查记录表（1_4）.doc"))
+                        shutil.copy(src, os.path.join(neiye_dir, f"附件6_{county_name}县级自查内业组检查记录表（1_4）.doc"))
                 
                 if "att7" in attachments:
                     r2 = await session.execute(text("SELECT qsdwdm, qsdwmc, form_data FROM neiye_records"))
                     records_by_qsdwdm = {str(r[0]): {"qsdwmc": r[1], "form_data": r[2] or {}} for r in r2.fetchall()}
                     await asyncio.to_thread(export_neiye_att7, records_by_qsdwdm)
-                    src = os.path.join(downloads_dir, "附件7_全椒县县级自查内业组检查得分表.doc")
+                    src = os.path.join(downloads_dir, f"附件7_{county_name}县级自查内业组检查得分表.doc")
                     if os.path.exists(src):
-                        shutil.copy(src, os.path.join(neiye_dir, "附件7_全椒县县级自查内业组检查得分表.doc"))
+                        shutil.copy(src, os.path.join(neiye_dir, f"附件7_{county_name}县级自查内业组检查得分表.doc"))
                 
                 # 2. 外业核查资料
                 waiye_dir = os.path.join(export_path, "2.外业核查资料")
@@ -76,9 +82,9 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                     """))
                     samples_rows = [dict(zip(r3.keys(), r)) for r in r3.fetchall()]
                     await asyncio.to_thread(export_waiye_att9, samples_rows)
-                    src = os.path.join(downloads_dir, "附件9_全椒县县级自查外业组检查得分表.doc")
+                    src = os.path.join(downloads_dir, f"附件9_{county_name}县级自查外业组检查得分表.doc")
                     if os.path.exists(src):
-                        shutil.copy(src, os.path.join(waiye_dir, "附件9_全椒县县级自查外业组检查得分表.doc"))
+                        shutil.copy(src, os.path.join(waiye_dir, f"附件9_{county_name}县级自查外业组检查得分表.doc"))
                 
                 # 3. 验收评定资料
                 score_dir = os.path.join(export_path, "3.验收评定资料")
@@ -87,14 +93,14 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                 scores, c_mech, has_county = await get_all_township_scores(session)
                 if "att10" in attachments:
                     await asyncio.to_thread(export_att10, scores, c_mech)
-                    src = os.path.join(downloads_dir, "附件10_全椒县县级自查得分汇总表.doc")
+                    src = os.path.join(downloads_dir, f"附件10_{county_name}县级自查得分汇总表.doc")
                     if os.path.exists(src):
-                        shutil.copy(src, os.path.join(score_dir, "附件10_全椒县县级自查得分汇总表.doc"))
+                        shutil.copy(src, os.path.join(score_dir, f"附件10_{county_name}县级自查得分汇总表.doc"))
                 
                 if "att11" in attachments:
                     # 获取特殊扣分项
                     special1, special2, special3 = False, False, 0.0
-                    r_spec = await session.execute(text("SELECT form_data FROM neiye_records WHERE qsdwdm = '341124'"))
+                    r_spec = await session.execute(text("SELECT form_data FROM neiye_records WHERE qsdwdm = :c_code OR level = 'county'"), {"c_code": county_code})
                     s_row = r_spec.fetchone()
                     if s_row and s_row[0]:
                         s_fd = s_row[0]
@@ -131,9 +137,9 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                     final_score = max(final_score, 0.0)
                     
                     await asyncio.to_thread(export_att11, county_avg, special1, special2, special3, final_score)
-                    src = os.path.join(downloads_dir, "附件11_全椒县县级自查验收评定表.doc")
+                    src = os.path.join(downloads_dir, f"附件11_{county_name}县级自查验收评定表.doc")
                     if os.path.exists(src):
-                        shutil.copy(src, os.path.join(score_dir, "附件11_全椒县县级自查验收评定表.doc"))
+                        shutil.copy(src, os.path.join(score_dir, f"附件11_{county_name}县级自查验收评定表.doc"))
                         
             elif level == "township":
                 clean_ts = sanitize_filename(township_name)
@@ -148,38 +154,35 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                 # For att4, att5 we need stats
                 stats_rows = []
                 if "att4" in attachments or "att5" in attachments:
-                    v_res = await session.execute(text("SELECT qsdwdm, qsdwmc FROM qsdwdmb WHERE qsdwdm::text LIKE :code"), {"code": f"{township_code}%"})
-                    v_dict = {str(r[0]): r[1] for r in v_res.fetchall()}
-                    from collections import defaultdict
-                    group_map = defaultdict(lambda: {"total": 0, "sampled": 0})
-                    
-                    # Fetch total contractors
-                    r_cbf = await session.execute(text("SELECT cbfbm FROM cbf WHERE cbfbm::text LIKE :code"), {"code": f"{township_code}%"})
-                    for (c_bm,) in r_cbf.fetchall():
-                        c_str = str(c_bm)
-                        if len(c_str) >= 14:
-                            g_code = c_str[:14]
-                            group_map[g_code]["total"] += 1
-                    
-                    # Fetch sampled
-                    r_samp = await session.execute(text("SELECT cbfbm FROM waiye_samples WHERE township_name = :name"), {"name": township_name})
-                    for (c_bm,) in r_samp.fetchall():
-                        c_str = str(c_bm)
-                        if len(c_str) >= 14:
-                            g_code = c_str[:14]
-                            group_map[g_code]["sampled"] += 1
-                            
-                    idx = 1
-                    for g_code, counts in group_map.items():
-                        v_code = g_code[:12] + "00"
-                        v_name = v_dict.get(v_code, "未知村")
-                        g_name = v_dict.get(g_code, "未知组")
-                        if counts["sampled"] > 0:
-                            stats_rows.append({
-                                "序号": idx, "乡镇名称": township_name, "村名称": v_name, "组名称": g_name,
-                                "发包方总户数": counts["total"], "抽样农户数5%": counts["sampled"]
-                            })
-                            idx += 1
+                    res_groups = await session.execute(text("""
+                        SELECT DISTINCT group_code, group_name, village_name
+                        FROM waiye_samples
+                        WHERE township_name = :name
+                        ORDER BY group_code
+                    """), {"name": township_name})
+                    groups = res_groups.fetchall()
+
+                    for idx, (g_code, g_name, v_name) in enumerate(groups, 1):
+                        # 1. 准确统计该发包方（村民小组）在承包方表中的总户数
+                        res_total = await session.execute(text(
+                            "SELECT COUNT(DISTINCT cbfbm) FROM cbf WHERE cbfbm::text LIKE :code"
+                        ), {"code": f"{g_code}%"})
+                        total_cbf = res_total.scalar() or 0
+
+                        # 2. 准确统计外业抽样表中该发包方实际抽取的去重承包方农户数
+                        res_samp = await session.execute(text(
+                            "SELECT COUNT(DISTINCT cbfbm) FROM waiye_samples WHERE group_code = :code"
+                        ), {"code": g_code})
+                        sampled_cbf = res_samp.scalar() or 0
+
+                        stats_rows.append({
+                            "序号": idx,
+                            "乡镇名称": township_name,
+                            "村名称": v_name,
+                            "组名称": g_name,
+                            "发包方总户数": total_cbf,
+                            "抽样农户数5%": sampled_cbf
+                        })
                             
                 if "att4" in attachments:
                     farmer_count = sum(r["发包方总户数"] for r in stats_rows)
@@ -204,9 +207,9 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                     row = r1.fetchone()
                     form_data = row[0] if (row and row[0]) else {}
                     await asyncio.to_thread(export_neiye_att6_township, township_name, form_data)
-                    src = os.path.join(downloads_dir, f"附件6_全椒县县级自查内业组检查记录表_{clean_ts}.doc")
+                    src = os.path.join(downloads_dir, f"附件6_{county_name}县级自查内业组检查记录表_{clean_ts}.doc")
                     if os.path.exists(src):
-                        shutil.copy(src, os.path.join(neiye_dir, f"附件6_全椒县县级自查内业组检查记录表_{clean_ts}.doc"))
+                        shutil.copy(src, os.path.join(neiye_dir, f"附件6_{county_name}县级自查内业组检查记录表_{clean_ts}.doc"))
                 
                 # 3. 外业核查
                 waiye_dir = os.path.join(export_path, "3.外业核查")
@@ -252,14 +255,18 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                     
                     for i_row in r_inq.fetchall():
                         cbfbm, fd, village_name, group_name, cbfmc, lxdh = i_row
+                        fd = fd or {}
+                        bxwr_name = fd.get("bxwr") or fd.get("cbfmc") or cbfmc
                         data = {
-                            "cbfbm": cbfbm, "cbfmc": fd.get("cbfmc", cbfmc),
+                            "cbfbm": cbfbm, 
+                            "cbfmc": cbfmc,
+                            "bxwr": bxwr_name,
                             "township_name": township_name, "village_name": village_name, "group_name": group_name,
                             "lxdh": fd.get("lxdh", lxdh), "gender": fd.get("gender", "男"),
-                            "form_data": fd or {}
+                            "form_data": fd
                         }
                         await asyncio.to_thread(export_waiye_inquiry, data)
-                        clean_cbf = sanitize_filename(data["cbfmc"])
+                        clean_cbf = sanitize_filename(cbfmc)
                         src = os.path.join(downloads_dir, f"附件_询问笔录_{clean_cbf}.doc")
                         if os.path.exists(src):
                             shutil.copy(src, os.path.join(inquiry_dir, f"附件_询问笔录_{clean_cbf}.doc"))

@@ -2,6 +2,8 @@ import os
 import shutil
 import pythoncom
 import win32com.client
+from doc_exporter import replace_common_bookmarks
+from database import get_base_dir
 
 def format_score(score):
     if score is None:
@@ -17,30 +19,46 @@ def export_att10(township_scores, county_mech):
     word = None
     doc = None
     try:
+        from database import get_county_and_townships_sync
+        county_info, township_list_raw = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+        township_list = [item["name"] for item in township_list_raw]
+
         word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False
         word.DisplayAlerts = 0
         
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件10.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_path = os.path.join(base_dir, "backend", "downloads", "附件10_全椒县县级自查得分汇总表.doc")
+        out_filename = f"附件10_{county_name}县级自查得分汇总表.doc"
+        out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         if os.path.exists(out_path):
             try: os.remove(out_path)
             except: pass
         shutil.copy(tpl, out_path)
         
         doc = word.Documents.Open(FileName=out_path, ReadOnly=False, ConfirmConversions=False)
+        replace_common_bookmarks(doc, county_name)
         t = doc.Tables(1)
         
-        township_list = [
-            "襄河镇", "古河镇", "大墅镇", "二郎口镇", "武岗镇",
-            "马厂镇", "石沛镇", "十字镇", "西王镇", "六镇镇"
-        ]
+        N = len(township_list)
+        # 表格初始结构：Row 1 和 2 是表头，最后一行是县级汇总行，中间预留行数 = t.Rows.Count - 3
+        current_reserved = t.Rows.Count - 3
+        if N > current_reserved:
+            # 在最后一个乡镇行后插入 N - current_reserved 行
+            last_ts_row = t.Rows.Count - 1
+            t.Cell(last_ts_row, 1).Select()
+            word.Selection.InsertRowsBelow(N - current_reserved)
+        elif N < current_reserved:
+            # 删除多余行
+            for _ in range(current_reserved - N):
+                del_row = t.Rows.Count - 1
+                t.Cell(del_row, 1).Select()
+                word.Selection.Rows.Delete()
         
         for idx, t_name in enumerate(township_list):
             r_idx = idx + 3
-                
             sc = township_scores.get(t_name, None)
             
             t.Cell(r_idx, 1).Range.Text = str(idx + 1)
@@ -57,7 +75,8 @@ def export_att10(township_scores, county_mech):
                 for c in range(3, 10):
                     t.Cell(r_idx, c).Range.Text = ""
                     
-        # Row 13 is the County
+        # Summary Row (County)
+        county_row = t.Rows.Count
         count_evaluated = len([sc for sc in township_scores.values() if sc])
         if count_evaluated > 0:
             avg_mech = round((sum(sc["mech"] for sc in township_scores.values() if sc) + county_mech) / (count_evaluated + 1), 1)
@@ -76,20 +95,20 @@ def export_att10(township_scores, county_mech):
             avg_effect = 20.0
             avg_total = avg_mech + avg_prog + avg_policy + avg_effect
 
-        t.Cell(13, 1).Range.Text = "11"
-        t.Cell(13, 2).Range.Text = "全椒县"
-        t.Cell(13, 3).Range.Text = format_score(avg_mech)
-        t.Cell(13, 4).Range.Text = format_score(avg_prog)
-        t.Cell(13, 5).Range.Text = format_score(avg_policy)
-        t.Cell(13, 6).Range.Text = format_score(avg_effect)
-        t.Cell(13, 7).Range.Text = format_score(avg_total)
+        t.Cell(county_row, 1).Range.Text = str(N + 1)
+        t.Cell(county_row, 2).Range.Text = county_name
+        t.Cell(county_row, 3).Range.Text = format_score(avg_mech)
+        t.Cell(county_row, 4).Range.Text = format_score(avg_prog)
+        t.Cell(county_row, 5).Range.Text = format_score(avg_policy)
+        t.Cell(county_row, 6).Range.Text = format_score(avg_effect)
+        t.Cell(county_row, 7).Range.Text = format_score(avg_total)
             
         doc.SaveAs2(FileName=out_path, FileFormat=0)
         doc.Close(0)
         doc = None
         word.Quit()
         word = None
-        return "/api/download?file=downloads/附件10_全椒县县级自查得分汇总表.doc"
+        return f"/api/download?file=downloads/{out_filename}"
     except Exception as e:
         print("export_att10 error:", e)
         if doc:
@@ -107,20 +126,26 @@ def export_att11(county_avg, special1, special2, special3, final_score):
     word = None
     doc = None
     try:
+        from database import get_county_and_townships_sync
+        county_info, _ = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+
         word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False
         word.DisplayAlerts = 0
         
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件11.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_path = os.path.join(base_dir, "backend", "downloads", "附件11_全椒县县级自查验收评定表.doc")
+        out_filename = f"附件11_{county_name}县级自查验收评定表.doc"
+        out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         if os.path.exists(out_path):
             try: os.remove(out_path)
             except: pass
         shutil.copy(tpl, out_path)
         
         doc = word.Documents.Open(FileName=out_path, ReadOnly=False, ConfirmConversions=False)
+        replace_common_bookmarks(doc, county_name)
         t = doc.Tables(1)
         
         t.Cell(2, 4).Range.Text = format_score(round(county_avg.get("mech", 15.0), 1))
@@ -192,7 +217,7 @@ def export_att11(county_avg, special1, special2, special3, final_score):
         doc = None
         word.Quit()
         word = None
-        return "/api/download?file=downloads/附件11_全椒县县级自查验收评定表.doc"
+        return f"/api/download?file=downloads/{out_filename}"
     except Exception as e:
         print("export_att11 error:", e)
         if doc:

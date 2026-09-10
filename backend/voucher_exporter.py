@@ -7,6 +7,7 @@ import win32com.client
 import logging
 from datetime import datetime
 from collections import defaultdict
+from database import get_base_dir
 
 NUM_ZHS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
 
@@ -16,19 +17,23 @@ def num_to_zh(n):
     return str(n)
 
 def export_voucher(qsdwdm, qsdwmc, form_data):
-    base_dir = os.path.abspath(os.path.dirname(__file__))
+    base_dir = get_base_dir()
     pythoncom.CoInitialize()
     word = None
     try:
         word = win32com.client.Dispatch("Word.Application")
         word.Visible = False
         
-        tpl_path = os.path.join(base_dir, "..", "附件", "核查凭证记录模板.doc")
+        tpl_path = os.path.join(base_dir, "附件", "核查凭证记录模板.doc")
         
         doc = word.Documents.Open(tpl_path)
         
-        with open(os.path.join(base_dir, "hierarchy.json"), "r", encoding="utf-8") as f:
-            hierarchy = json.load(f)
+        hierarchy_path = os.path.join(base_dir, "backend", "hierarchy.json")
+        if os.path.exists(hierarchy_path):
+            with open(hierarchy_path, "r", encoding="utf-8") as f:
+                hierarchy = json.load(f)
+        else:
+            hierarchy = {}
             
         evidences = form_data.get("evidences", {})
         
@@ -141,7 +146,7 @@ def export_voucher(qsdwdm, qsdwmc, form_data):
             rng.Text = datetime.now().strftime("%Y年%m月%d日")
             
         out_filename = f"核查凭证记录_{qsdwmc}.doc"
-        out_path = os.path.join(base_dir, "downloads", out_filename)
+        out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         doc.SaveAs(out_path)
         doc.Close(SaveChanges=False)
         word.Quit()
@@ -151,7 +156,7 @@ def export_voucher(qsdwdm, qsdwmc, form_data):
         
     except Exception as e:
         import traceback
-        with open(os.path.join(base_dir, "voucher_error.log"), "w", encoding="utf-8") as err_f:
+        with open(os.path.join(base_dir, "backend", "voucher_error.log"), "w", encoding="utf-8") as err_f:
             traceback.print_exc(file=err_f)
         logging.exception("Voucher export failed")
         if word:

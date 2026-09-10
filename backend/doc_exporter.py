@@ -4,6 +4,7 @@ import shutil
 import pythoncom
 import win32com.client
 from collections import defaultdict
+from database import get_base_dir
 
 
 def _cell_replace_checkbox(cell, option, checked=True):
@@ -67,6 +68,61 @@ def _insert_sign_img(doc, names, sign_data):
             ratio = shape.Width / shape.Height if shape.Height else 2
             shape.Height = 30
             shape.Width = 30 * ratio
+
+from datetime import datetime
+
+def replace_common_bookmarks(doc, county_name: str, date_str: str = None):
+    """
+    通用替换所有附件中的全局书签：
+    1. county_name -> 县级区域名称
+    2. date -> 当前时间 XXXX年XX月XX日
+    """
+    if not date_str:
+        now = datetime.now()
+        date_str = f"{now.year}年{now.month:02d}月{now.day:02d}日"
+
+    if doc.Bookmarks.Exists("county_name"):
+        try:
+            doc.Bookmarks("county_name").Range.Text = county_name
+        except Exception as e:
+            print(f"替换书签 county_name 异常: {e}")
+
+    if doc.Bookmarks.Exists("county_name1"):
+        try:
+            doc.Bookmarks("county_name1").Range.Text = county_name
+        except Exception as e:
+            print(f"替换书签 county_name1 异常: {e}")
+
+    if doc.Bookmarks.Exists("date"):
+        try:
+            doc.Bookmarks("date").Range.Text = date_str
+        except Exception as e:
+            print(f"替换书签 date 异常: {e}")
+
+def replace_att6_bookmarks(doc, county_name: str, date_str: str = None):
+    """
+    针对附件6各分表书签替换：
+    county_name1/2/3/4 -> 县级区域名称
+    date1/2/3/4 -> 当前时间 XXXX年XX月XX日
+    """
+    if not date_str:
+        now = datetime.now()
+        date_str = f"{now.year}年{now.month:02d}月{now.day:02d}日"
+
+    for i in range(1, 5):
+        bm_c = f"county_name{i}"
+        if doc.Bookmarks.Exists(bm_c):
+            try:
+                doc.Bookmarks(bm_c).Range.Text = county_name
+            except Exception as e:
+                print(f"替换书签 {bm_c} 异常: {e}")
+
+        bm_d = f"date{i}"
+        if doc.Bookmarks.Exists(bm_d):
+            try:
+                doc.Bookmarks(bm_d).Range.Text = date_str
+            except Exception as e:
+                print(f"替换书签 {bm_d} 异常: {e}")
 
 def _fill_bookmarks(doc, names, text):
     """Fill named bookmarks with text, padding with spaces to original length."""
@@ -175,8 +231,6 @@ def fill_table_1(t1, form_data, scores):
         _cell_replace_checkbox(t1.Rows(2).Cells(4), "未制定方案")
     if any("直接套用上级方案" in x for x in form_data.get("mech_1", [])):
         _cell_replace_checkbox(t1.Rows(2).Cells(4), "直接套用上级方案")
-    if any("分工不明确" in x for x in form_data.get("mech_1", [])):
-        _cell_replace_checkbox(t1.Rows(2).Cells(4), "分工不明确")
     if any("制定程序不合法" in x for x in form_data.get("mech_1", [])):
         _cell_replace_checkbox(t1.Rows(2).Cells(4), "制定程序不合法")
     t1.Rows(2).Cells(6).Range.Text = f"{scores['deduct']['m1']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['m1'] > 0 else "0"
@@ -223,8 +277,6 @@ def fill_table_2(t2, form_data, scores):
         _cell_replace_checkbox(t2.Rows(2).Cells(4), "未召开会议")
     if any("未公示工作组名单" in x for x in form_data.get("prog_1", [])):
         _cell_replace_checkbox(t2.Rows(2).Cells(4), "未公示工作组名单")
-    if any("公示时间不足15天" in x for x in form_data.get("prog_1", [])):
-        _cell_replace_checkbox(t2.Rows(2).Cells(4), "公示时间不足15天")
     if any("参会人数不足法定数量" in x for x in form_data.get("prog_1", [])):
         _cell_replace_checkbox(t2.Rows(2).Cells(4), "参会人数不足法定数量")
     t2.Rows(2).Cells(6).Range.Text = f"{scores['deduct']['p1']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['p1'] > 0 else "0"
@@ -264,8 +316,8 @@ def fill_table_2(t2, form_data, scores):
     # R5: 调查公示
     if any("没有公示材料" in x for x in form_data.get("prog_4", [])):
         _cell_replace_checkbox(t2.Rows(5).Cells(4), "没有公示材料")
-    if any("没有公示或不足15天" in x for x in form_data.get("prog_4", [])):
-        _cell_replace_checkbox(t2.Rows(5).Cells(4), "没有公示或不足15天")
+    if any("公示不足15天" in x or "没有公示或不足15天" in x for x in form_data.get("prog_4", [])):
+        _cell_replace_checkbox(t2.Rows(5).Cells(4), "公示不足15天")
     if any("公示结果未确认" in x for x in form_data.get("prog_4", [])):
         _cell_replace_checkbox(t2.Rows(5).Cells(4), "公示结果未确认")
     if any("各类资料不齐全" in x for x in form_data.get("prog_4", [])):
@@ -299,10 +351,16 @@ def fill_table_2(t2, form_data, scores):
     # R8: 资料归档
     if any("档案整理第三方无涉密档案整理资质" in x for x in form_data.get("prog_7", [])):
         _cell_replace_checkbox(t2.Rows(8).Cells(4), "档案整理第三方无涉密档案整理资质")
-    if any("没有进行档案验收" in x for x in form_data.get("prog_7", [])):
-        _cell_replace_checkbox(t2.Rows(8).Cells(4), "没有进行档案验收")
-    if any("档案验收不符合相关标准" in x for x in form_data.get("prog_7", [])):
-        _cell_replace_checkbox(t2.Rows(8).Cells(4), "档案验收不符合相关标准")
+    if any("档案资料收集不齐全" in x for x in form_data.get("prog_7", [])):
+        _cell_replace_checkbox(t2.Rows(8).Cells(4), "档案资料收集不齐全")
+    if any("档案分类不符合要求" in x for x in form_data.get("prog_7", [])):
+        _cell_replace_checkbox(t2.Rows(8).Cells(4), "档案分类不符合要求")
+    if any("档号与归档章不一致" in x for x in form_data.get("prog_7", [])):
+        _cell_replace_checkbox(t2.Rows(8).Cells(4), "档号与归档章不一致")
+    if any("档案变数字化瑕疵" in x for x in form_data.get("prog_7", [])):
+        _cell_replace_checkbox(t2.Rows(8).Cells(4), "档案变数字化瑕疵")
+    if any("姓名著录错误" in x for x in form_data.get("prog_7", [])):
+        _cell_replace_checkbox(t2.Rows(8).Cells(4), "“一户一档”姓名著录错误")
     t2.Rows(8).Cells(6).Range.Text = f"{scores['deduct']['p7']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['p7'] > 0 else "0"
 
     # R9: 总计扣分
@@ -409,27 +467,37 @@ def fill_table_4(t4, form_data, scores):
 def export_neiye_att6_township(township_name, form_data):
     pythoncom.CoInitialize()
     try:
+        from database import get_county_and_townships_sync
+        county_info, _ = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+
         word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False
         word.DisplayAlerts = False
         
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件6.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_path = os.path.join(base_dir, "backend", "downloads", f"附件6_全椒县县级自查内业组检查记录表_{township_name}.doc")
+        out_filename = f"附件6_{county_name}县级自查内业组检查记录表_{township_name}.doc"
+        out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         shutil.copy(tpl, out_path)
         
         doc = word.Documents.Open(out_path)
         
+        # 替换通用与附件6书签：county_name1/2/3/4 -> 县级区域名称，date1/2/3/4 -> 当前时间
+        replace_common_bookmarks(doc, county_name)
+        replace_att6_bookmarks(doc, county_name)
+
         # Fill 行政区划名称 bookmarks in all 4 pages (xzqh_1 ~ xzqh_4)
-        _xzqh_text = "全椒县" + township_name
+        if township_name.startswith(county_name):
+            _xzqh_text = township_name
+        else:
+            _xzqh_text = county_name + township_name
         _fill_bookmarks(doc, ["xzqh_1", "xzqh_2", "xzqh_3", "xzqh_4"], _xzqh_text)
         jcz_sign = form_data.get("jcz_sign")
         fhz_sign = form_data.get("fhz_sign")
         _fill_bookmarks(doc, ["jcz1", "jcz2", "jcz3", "jcz4"], form_data.get("jcz_name") or "")
         _fill_bookmarks(doc, ["fhz1", "fhz2", "fhz3", "fhz4"], form_data.get("fhz_name") or "")
-        from datetime import datetime
-        _fill_bookmarks(doc, ["date1", "date2", "date3", "date4"], datetime.now().strftime("%Y年%m月%d日"))
         
         scores = calculate_neiye_subscores(form_data)
         
@@ -441,7 +509,7 @@ def export_neiye_att6_township(township_name, form_data):
         doc.Save()
         doc.Close(False)
         word.Quit()
-        return f"/api/download?file=downloads/附件6_全椒县县级自查内业组检查记录表_{township_name}.doc"
+        return f"/api/download?file=downloads/{out_filename}"
     except Exception as e:
         print("export_neiye_att6_township error:", e)
         try: word.Quit()
@@ -453,26 +521,33 @@ def export_neiye_att6_township(township_name, form_data):
 def export_neiye_att6_county(form_data):
     pythoncom.CoInitialize()
     try:
+        from database import get_county_and_townships_sync
+        county_info, _ = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+
         word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False
         word.DisplayAlerts = False
         
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件6.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_path = os.path.join(base_dir, "backend", "downloads", "附件6_全椒县县级自查内业组检查记录表（1_4）.doc")
+        out_filename = f"附件6_{county_name}县级自查内业组检查记录表（1_4）.doc"
+        out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         shutil.copy(tpl, out_path)
         
         doc = word.Documents.Open(out_path)
         
+        # 替换通用与附件6书签：county_name1/2/3/4 -> 县级区域名称，date1/2/3/4 -> 当前时间
+        replace_common_bookmarks(doc, county_name)
+        replace_att6_bookmarks(doc, county_name)
+
         # Fill 行政区划名称 bookmark for page 1 only (county export)
-        _fill_bookmarks(doc, ["xzqh_1"], "全椒县")
+        _fill_bookmarks(doc, ["xzqh_1"], county_name)
         jcz_sign = form_data.get("jcz_sign")
         fhz_sign = form_data.get("fhz_sign")
         _fill_bookmarks(doc, ["jcz1", "jcz2", "jcz3", "jcz4"], form_data.get("jcz_name") or "")
         _fill_bookmarks(doc, ["fhz1", "fhz2", "fhz3", "fhz4"], form_data.get("fhz_name") or "")
-        from datetime import datetime
-        _fill_bookmarks(doc, ["date1", "date2", "date3", "date4"], datetime.now().strftime("%Y年%m月%d日"))
         
         scores = calculate_neiye_subscores(form_data)
         fill_table_1(doc.Tables(1), form_data, scores)
@@ -494,7 +569,7 @@ def export_neiye_att6_county(form_data):
         doc.Save()
         doc.Close(False)
         word.Quit()
-        return "/api/download?file=downloads/附件6_全椒县县级自查内业组检查记录表（1_4）.doc"
+        return f"/api/download?file=downloads/{out_filename}"
     except Exception as e:
         print("export_neiye_att6_county error:", e)
         try: word.Quit()
@@ -506,23 +581,28 @@ def export_neiye_att6_county(form_data):
 def export_neiye_att7(records_by_qsdwdm):
     pythoncom.CoInitialize()
     try:
+        from database import get_county_and_townships_sync
+        county_info, township_list_raw = get_county_and_townships_sync()
+        county_code = county_info.get("code", "341124")
+        county_name = county_info.get("name", "全椒县")
+
         word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False
         word.DisplayAlerts = False
         
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件7.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_path = os.path.join(base_dir, "backend", "downloads", "附件7_全椒县县级自查内业组检查得分表.doc")
+        out_filename = f"附件7_{county_name}县级自查内业组检查得分表.doc"
+        out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         shutil.copy(tpl, out_path)
         
         doc = word.Documents.Open(out_path)
+        replace_common_bookmarks(doc, county_name)
         t = doc.Tables(1)
         
         # 1. County row (Row 2)
-        
-        
-        county_rec = records_by_qsdwdm.get("341124")
+        county_rec = records_by_qsdwdm.get(county_code) or records_by_qsdwdm.get("341124")
         if county_rec:
             c_scores = calculate_neiye_subscores(county_rec.get("form_data", {}))
             county_mech = c_scores['score']['mech']
@@ -530,25 +610,24 @@ def export_neiye_att7(records_by_qsdwdm):
             county_mech = 15.0
 
         t.Rows(2).Cells(1).Range.Text = "1"
-        t.Rows(2).Cells(2).Range.Text = "全椒县"
+        t.Rows(2).Cells(2).Range.Text = county_name
         t.Rows(2).Cells(3).Range.Text = f"{county_mech:.1f}".rstrip('0').rstrip('.')
         t.Rows(2).Cells(4).Range.Text = "/"
         t.Rows(2).Cells(5).Range.Text = "/"
         t.Rows(2).Cells(6).Range.Text = "/"
         t.Rows(2).Cells(7).Range.Text = "/"
 
-        township_list = [
-            ("341124100", "襄河镇"),
-            ("341124101", "古河镇"),
-            ("341124102", "大墅镇"),
-            ("341124103", "二郎口镇"),
-            ("341124104", "武岗镇"),
-            ("341124105", "马厂镇"),
-            ("341124106", "石沛镇"),
-            ("341124107", "十字镇"),
-            ("341124108", "西王镇"),
-            ("341124109", "六镇镇")
-        ]
+        township_list = [(t["code"], t["name"]) for t in township_list_raw]
+        N = len(township_list)
+        # 表格初始结构：Row 1 表头，Row 2 县级行，最后一行是总评行
+        # 当前预留的乡镇行数 = t.Rows.Count - 3
+        current_reserved_ts_rows = t.Rows.Count - 3
+        if N > current_reserved_ts_rows:
+            for _ in range(N - current_reserved_ts_rows):
+                t.Rows.Add(t.Rows(t.Rows.Count))
+        elif N < current_reserved_ts_rows:
+            for _ in range(current_reserved_ts_rows - N):
+                t.Rows(t.Rows.Count - 1).Delete()
         
         sums = {"mech": 0.0, "prog": 0.0, "policy": 0.0, "effect": 0.0, "total": 0.0}
         count_evaluated = 0
@@ -576,9 +655,10 @@ def export_neiye_att7(records_by_qsdwdm):
                 t.Rows(r_idx).Cells(6).Range.Text = ""
                 t.Rows(r_idx).Cells(7).Range.Text = ""
 
-        # Row 13: 总评 (平均分)
-        t.Rows(13).Cells(1).Range.Text = "12"
-        t.Rows(13).Cells(2).Range.Text = "总评"
+        # Last Row: 总评 (平均分)
+        summary_row = t.Rows.Count
+        t.Rows(summary_row).Cells(1).Range.Text = str(N + 2)
+        t.Rows(summary_row).Cells(2).Range.Text = "总评"
         if count_evaluated > 0:
             mech_count = count_evaluated + 1
             avg_mech = (sums['mech'] + county_mech) / mech_count
@@ -587,24 +667,24 @@ def export_neiye_att7(records_by_qsdwdm):
             avg_effect = sums['effect'] / count_evaluated
             avg_total = avg_mech + avg_prog + avg_policy + avg_effect
             
-            t.Rows(13).Cells(3).Range.Text = f"{avg_mech:.1f}"
-            t.Rows(13).Cells(4).Range.Text = f"{avg_prog:.1f}"
-            t.Rows(13).Cells(5).Range.Text = f"{avg_policy:.1f}"
-            t.Rows(13).Cells(6).Range.Text = f"{avg_effect:.1f}"
-            t.Rows(13).Cells(7).Range.Text = f"{avg_total:.1f}"
+            t.Rows(summary_row).Cells(3).Range.Text = f"{avg_mech:.1f}"
+            t.Rows(summary_row).Cells(4).Range.Text = f"{avg_prog:.1f}"
+            t.Rows(summary_row).Cells(5).Range.Text = f"{avg_policy:.1f}"
+            t.Rows(summary_row).Cells(6).Range.Text = f"{avg_effect:.1f}"
+            t.Rows(summary_row).Cells(7).Range.Text = f"{avg_total:.1f}"
         else:
-            t.Rows(13).Cells(3).Range.Text = ""
-            t.Rows(13).Cells(4).Range.Text = ""
-            t.Rows(13).Cells(5).Range.Text = ""
-            t.Rows(13).Cells(6).Range.Text = ""
-            t.Rows(13).Cells(7).Range.Text = ""
+            t.Rows(summary_row).Cells(3).Range.Text = ""
+            t.Rows(summary_row).Cells(4).Range.Text = ""
+            t.Rows(summary_row).Cells(5).Range.Text = ""
+            t.Rows(summary_row).Cells(6).Range.Text = ""
+            t.Rows(summary_row).Cells(7).Range.Text = ""
 
 
 
         doc.Save()
         doc.Close(False)
         word.Quit()
-        return "/api/download?file=downloads/附件7_全椒县县级自查内业组检查得分表.doc"
+        return f"/api/download?file=downloads/{out_filename}"
     except Exception as e:
         print("export_neiye_att7 error:", e)
         try: word.Quit()
@@ -621,7 +701,7 @@ def export_att4(township_name, farmer_count, total_area):
         word.Visible = False
         word.DisplayAlerts = 0
         
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         os.makedirs(os.path.join(base_dir, 'backend', 'downloads'), exist_ok=True)
         template = os.path.join(base_dir, '附件', '附件4.doc')
         clean_ts = sanitize_filename(township_name)
@@ -631,7 +711,12 @@ def export_att4(township_name, farmer_count, total_area):
             except: pass
         shutil.copy(template, out)
         
+        from database import get_county_and_townships_sync
+        county_info, _ = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+
         doc = word.Documents.Open(FileName=out, ReadOnly=False, ConfirmConversions=False)
+        replace_common_bookmarks(doc, county_name)
         t = doc.Tables(1)
         t.Cell(1, 2).Range.Text = township_name
         t.Cell(5, 2).Range.Text = str(farmer_count)
@@ -663,7 +748,7 @@ def export_att5(stats_data, township_code, township_name):
         word.Visible = False
         word.DisplayAlerts = 0
         
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         os.makedirs(os.path.join(base_dir, 'backend', 'downloads'), exist_ok=True)
         
         att5_template = os.path.join(base_dir, '附件', '附件5.doc')
@@ -675,6 +760,10 @@ def export_att5(stats_data, township_code, township_name):
         shutil.copy(att5_template, att5_out)
         
         doc5 = word.Documents.Open(FileName=att5_out, ReadOnly=False, ConfirmConversions=False)
+        from database import get_county_and_townships_sync
+        county_info, _ = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+        replace_common_bookmarks(doc5, county_name)
         t5 = doc5.Tables(1)
         
         while t5.Rows.Count > 2:
@@ -722,7 +811,7 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
         word.Visible = False
         word.DisplayAlerts = 0
         
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         tpl = os.path.join(base_dir, '附件', '附件8.doc')
         clean_ts = sanitize_filename(township_name)
         clean_vn = sanitize_filename(village_name)
@@ -736,10 +825,17 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
         shutil.copy(tpl, out_path)
         
         doc8 = word.Documents.Open(FileName=out_path, ReadOnly=False, ConfirmConversions=False)
+        from database import get_county_and_townships_sync
+        county_info, _ = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+        replace_common_bookmarks(doc8, county_name)
+
+        now = datetime.now()
+        date_str = f"{now.year} 年  {now.month:02d}  月  {now.day:02d}  日"
         p3 = doc8.Paragraphs(3)
         rng = p3.Range
         rng.End = rng.End - 1
-        rng.Text = f"   乡镇：{township_name} \t行政村：{village_name} \t村民小组：{group_name}" + " "*30 + "2026 年    月    日"
+        rng.Text = f"   乡镇：{township_name} \t行政村：{village_name} \t村民小组：{group_name}" + " "*25 + date_str
         
         t8 = doc8.Tables(1)
         for _ in range(5):
@@ -894,29 +990,38 @@ def export_waiye_att9(samples_rows):
     word = None
     doc = None
     try:
+        from database import get_county_and_townships_sync
+        county_info, township_list_raw = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+        all_townships = [item["name"] for item in township_list_raw]
+
         word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False
         word.DisplayAlerts = 0
         
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件9.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_path = os.path.join(base_dir, "backend", "downloads", "附件9_全椒县县级自查外业组检查得分表.doc")
+        out_filename = f"附件9_{county_name}县级自查外业组检查得分表.doc"
+        out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         if os.path.exists(out_path):
             try: os.remove(out_path)
             except: pass
         shutil.copy(tpl, out_path)
         
         doc = word.Documents.Open(FileName=out_path, ReadOnly=False, ConfirmConversions=False)
+        replace_common_bookmarks(doc, county_name)
         t = doc.Tables(1)
         
+        # 1. 计算每个组的得分，并按 乡镇 -> 行政村 -> 村民小组 组织层级
         groups_map = defaultdict(list)
         for r in samples_rows:
             key = (r.get("township_name", ""), r.get("village_name", ""), r.get("group_name", ""))
-            groups_map[key].append(r)
+            if key[0]:
+                groups_map[key].append(r)
             
-        group_stats = []
-        township_groups = defaultdict(list)
+        # 结构：hierarchy[t_name][v_name] = [ { "group": g_name, "prog_score": ..., "effect_score": ... }, ... ]
+        hierarchy = defaultdict(lambda: defaultdict(list))
         
         for (t_name, v_name, g_name), g_rows in groups_map.items():
             total_errors = 0
@@ -944,52 +1049,156 @@ def export_waiye_att9(samples_rows):
             prog_score = max(20.0 - total_errors * 0.5, 0.0)
             effect_score = (satisfaction_count / c_cnt * 10.0) if c_cnt > 0 else 10.0
             
-            item = {
-                "township": t_name,
-                "village": v_name,
+            hierarchy[t_name][v_name].append({
                 "group": g_name,
                 "prog_score": prog_score,
                 "effect_score": effect_score
-            }
-            group_stats.append(item)
-            township_groups[t_name].append(item)
+            })
             
-        township_avg = {}
-        for t_name, items in township_groups.items():
-            township_avg[t_name] = {
-                "prog": sum(x["prog_score"] for x in items) / len(items),
-                "effect": sum(x["effect_score"] for x in items) / len(items)
-            }
-            
-        for idx, item in enumerate(group_stats):
-            r_idx = idx + 3
-            if r_idx > 12:
-                t.Cell(r_idx - 1, 1).Select()
-                word.Selection.SelectRow()
-                word.Selection.InsertRowsBelow(1)
-                
-            t_avg = township_avg.get(item["township"], {"prog": 20.0, "effect": 10.0})
-            
-            t.Cell(r_idx, 1).Range.Text = str(idx + 1)
-            t.Cell(r_idx, 2).Range.Text = item["township"]
-            t.Cell(r_idx, 3).Range.Text = format_score(t_avg["prog"])
-            t.Cell(r_idx, 4).Range.Text = format_score(t_avg["effect"])
-            t.Cell(r_idx, 5).Range.Text = item["village"]
-            t.Cell(r_idx, 6).Range.Text = item["group"]
-            t.Cell(r_idx, 7).Range.Text = format_score(item["prog_score"])
-            t.Cell(r_idx, 8).Range.Text = format_score(item["effect_score"])
+        # 2. 按照实际有抽样数据的乡镇排序列出块结构
+        # 规则：村得分由各组得分平均值，乡镇得分为各村平均值
+        if all_townships:
+            sampled_townships = [t for t in all_townships if t in hierarchy]
+        else:
+            sampled_townships = list(hierarchy.keys())
 
-        for r_idx in range(len(group_stats) + 3, 13):
-            for c in range(1, 9):
-                try: t.Cell(r_idx, c).Range.Text = ""
-                except: pass
+        township_blocks = []
+        current_row = 3
+        total_rows_needed = 0
+
+        for ts_idx, t_name in enumerate(sampled_townships):
+            v_dict = hierarchy.get(t_name, {})
+            if not v_dict:
+                continue
+
+            ts_start_row = current_row
+            v_blocks = []
+            
+            for v_name, g_list in v_dict.items():
+                if not g_list:
+                    continue
+                v_start_row = current_row
+                g_count = len(g_list)
+                v_end_row = current_row + g_count - 1
+                
+                # 村得分为各组得分平均值
+                v_prog = sum(g["prog_score"] for g in g_list) / g_count
+                v_effect = sum(g["effect_score"] for g in g_list) / g_count
+                
+                v_blocks.append({
+                    "village": v_name,
+                    "v_prog": v_prog,
+                    "v_effect": v_effect,
+                    "start_row": v_start_row,
+                    "end_row": v_end_row,
+                    "groups": g_list
+                })
+                current_row += g_count
+                total_rows_needed += g_count
+
+            ts_end_row = current_row - 1
+            # 乡镇得分为各村得分平均值
+            if v_blocks:
+                town_prog = sum(vb["v_prog"] for vb in v_blocks) / len(v_blocks)
+                town_effect = sum(vb["v_effect"] for vb in v_blocks) / len(v_blocks)
+            else:
+                town_prog = 20.0
+                town_effect = 10.0
+
+            township_blocks.append({
+                "ts_no": str(ts_idx + 1),
+                "township": t_name,
+                "town_prog": town_prog,
+                "town_effect": town_effect,
+                "start_row": ts_start_row,
+                "end_row": ts_end_row,
+                "villages": v_blocks
+            })
+
+        N = total_rows_needed
+        # 表格初始结构：Row 1 和 2 是表头，预留数据行数 = t.Rows.Count - 2
+        current_reserved = t.Rows.Count - 2
+        if N > current_reserved:
+            last_row = t.Rows.Count
+            t.Cell(last_row, 1).Select()
+            word.Selection.InsertRowsBelow(N - current_reserved)
+        elif N < current_reserved:
+            for _ in range(current_reserved - N):
+                last_row = t.Rows.Count
+                t.Cell(last_row, 1).Select()
+                word.Selection.Rows.Delete()
+
+        # 3. 填充全部单元格
+        # 对于即将纵向合并的列：
+        # - 镇级（列 1~4）：仅在 ts_start_row 填充文本，其余行留空
+        # - 村级（列 5~7）：仅在 v_start_row 填充文本，其余行留空
+        # - 组级（列 8~10）：每行填充对应的组信息与得分
+        for ts_b in township_blocks:
+            for vb in ts_b["villages"]:
+                for g_idx, g_item in enumerate(vb["groups"]):
+                    r_idx = vb["start_row"] + g_idx
+                    
+                    # 镇级列 (1~4)
+                    if r_idx == ts_b["start_row"]:
+                        t.Cell(r_idx, 1).Range.Text = ts_b["ts_no"]
+                        t.Cell(r_idx, 2).Range.Text = ts_b["township"]
+                        t.Cell(r_idx, 3).Range.Text = format_score(ts_b["town_prog"])
+                        t.Cell(r_idx, 4).Range.Text = format_score(ts_b["town_effect"])
+                    else:
+                        t.Cell(r_idx, 1).Range.Text = ""
+                        t.Cell(r_idx, 2).Range.Text = ""
+                        t.Cell(r_idx, 3).Range.Text = ""
+                        t.Cell(r_idx, 4).Range.Text = ""
+
+                    # 村级列 (5~7)
+                    if r_idx == vb["start_row"]:
+                        t.Cell(r_idx, 5).Range.Text = vb["village"]
+                        t.Cell(r_idx, 6).Range.Text = format_score(vb["v_prog"])
+                        t.Cell(r_idx, 7).Range.Text = format_score(vb["v_effect"])
+                    else:
+                        t.Cell(r_idx, 5).Range.Text = ""
+                        t.Cell(r_idx, 6).Range.Text = ""
+                        t.Cell(r_idx, 7).Range.Text = ""
+
+                    # 组级列 (8~10)
+                    t.Cell(r_idx, 8).Range.Text = g_item["group"]
+                    t.Cell(r_idx, 9).Range.Text = format_score(g_item["prog_score"])
+                    t.Cell(r_idx, 10).Range.Text = format_score(g_item["effect_score"])
+
+        # 4. 逆序执行单元格纵向合并 (先合并村级列 7,6,5，再合并镇级列 4,3,2,1)
+        # 倒序遍历村块执行合并
+        all_village_blocks = []
+        for ts_b in township_blocks:
+            for vb in ts_b["villages"]:
+                all_village_blocks.append(vb)
+
+        for vb in reversed(all_village_blocks):
+            if vb["end_row"] > vb["start_row"]:
+                for c in [7, 6, 5]:
+                    try:
+                        t.Cell(vb["start_row"], c).Merge(t.Cell(vb["end_row"], c))
+                        t.Cell(vb["start_row"], c).VerticalAlignment = 1
+                        t.Cell(vb["start_row"], c).Range.ParagraphFormat.Alignment = 1
+                    except Exception as me:
+                        print(f"Merge village cells error at {vb['start_row']}-{vb['end_row']} col {c}: {me}")
+
+        # 倒序遍历乡镇块执行合并
+        for ts_b in reversed(township_blocks):
+            if ts_b["end_row"] > ts_b["start_row"]:
+                for c in [4, 3, 2, 1]:
+                    try:
+                        t.Cell(ts_b["start_row"], c).Merge(t.Cell(ts_b["end_row"], c))
+                        t.Cell(ts_b["start_row"], c).VerticalAlignment = 1
+                        t.Cell(ts_b["start_row"], c).Range.ParagraphFormat.Alignment = 1
+                    except Exception as me:
+                        print(f"Merge township cells error at {ts_b['start_row']}-{ts_b['end_row']} col {c}: {me}")
 
         doc.SaveAs2(FileName=out_path, FileFormat=0)
         doc.Close(0)
         doc = None
         word.Quit()
         word = None
-        return "/api/download?file=downloads/附件9_全椒县县级自查外业组检查得分表.doc"
+        return f"/api/download?file=downloads/{out_filename}"
     except Exception as e:
         print("export_waiye_att9 error:", e)
         if doc:
@@ -1018,17 +1227,18 @@ def _build_rectify_rows(neiye_form, waiye_rows, township_name):
     rows = []
     
     MAJOR_NEIYE = [
-        "未制定方案", "直接套用上级方案", "分工不明确", "制定程序不合法", 
-        "未召开会议", "未公示工作组名单", "公示时间不足15天", "参会人数不足法定数量", 
+        "未制定方案", "直接套用上级方案", "制定程序不合法", 
+        "未召开会议", "未公示工作组名单", "参会人数不足法定数量", 
         "没有延包方案", "延包方案未上报", "延包方案未公示", "未召开会议讨论延包方案", 
         "合同版本格式不正确", "合同网签率未达到95%", "没有地块示意图", 
-        "档案整理第三方无涉密档案整理资质", "没有进行档案验收", "档案验收不符合相关标准"
+        "档案整理第三方无涉密档案整理资质", "档案资料收集不齐全", "档案分类不符合要求", 
+        "档号与归档章不一致", "档案变数字化瑕疵", "姓名著录错误"
     ]
     SEVERE_NEIYE = [
         "支付不规范", "支付不及时", "经费没有县级兜底", "没有进行摸底", 
         "摸底表农户未签署", "摸底表中没有表达延包意愿", "摸底表其它签署不齐全", 
         "特殊人员摸底不清或未统计", "户变化未统计", "矛盾纠纷未登记或处理不当", 
-        "承包地变化未摸清", "没有应确尽确", "没有公示材料", "没有公示不足15天", "没有公示或不足15天",
+        "承包地变化未摸清", "没有应确尽确", "没有公示材料", "没有公示不足15天", "没有公示或不足15天", "公示不足15天",
         "公示结果未确认", "未进行信息共享", "未与不动产登记部门有序衔接", 
         "未保障特殊群体权益", "未保障无地户权益", "没有应收尽收", 
         "采用不正当方式隐匿消亡户", "违背农户意愿强行推进", "确权确股不确地手续不齐全", 
@@ -1158,7 +1368,7 @@ def export_rectify_att12(township_name):
         word.Visible = False
         word.DisplayAlerts = 0
 
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件12.doc")
         clean_ts = sanitize_filename(township_name)
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
@@ -1169,6 +1379,11 @@ def export_rectify_att12(township_name):
         shutil.copy(tpl, out_path)
 
         doc = word.Documents.Open(FileName=out_path, ReadOnly=False, ConfirmConversions=False)
+
+        from database import get_county_and_townships_sync
+        county_info, _ = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+        replace_common_bookmarks(doc, county_name)
 
         # 替换标题中的"（模版）"，用 Find 保留段落格式
         f12 = doc.Content.Find
@@ -1208,7 +1423,7 @@ def export_rectify_att13(township_name, neiye_form, waiye_rows):
         word.Visible = False
         word.DisplayAlerts = 0
 
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件13.doc")
         clean_ts = sanitize_filename(township_name)
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
@@ -1219,6 +1434,11 @@ def export_rectify_att13(township_name, neiye_form, waiye_rows):
         shutil.copy(tpl, out_path)
 
         doc = word.Documents.Open(FileName=out_path, ReadOnly=False, ConfirmConversions=False)
+        from database import get_county_and_townships_sync
+        county_info, _ = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+        replace_common_bookmarks(doc, county_name)
+
         t = doc.Tables(1)
 
         # 删除模板中的空白数据行，仅保留表头
@@ -1281,9 +1501,12 @@ def export_waiye_inquiry(data):
         word.Visible = False
         word.DisplayAlerts = 0
         
-        base_dir = os.path.abspath(r"G:\全椒县二轮延包\全椒县县级验收管理平台")
+        base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "询问笔录.doc")
-        clean_cbf = sanitize_filename(data.get("cbfmc", ""))
+        
+        # 实际承包方名称用于文件名和书签 cbfmc
+        real_cbfmc = str(data.get("cbfmc", "")).strip()
+        clean_cbf = sanitize_filename(real_cbfmc)
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
         out_path = os.path.join(base_dir, "backend", "downloads", f"附件_询问笔录_{clean_cbf}.doc")
         if os.path.exists(out_path):
@@ -1292,7 +1515,11 @@ def export_waiye_inquiry(data):
         shutil.copy(tpl, out_path)
         
         doc = word.Documents.Open(FileName=out_path, ReadOnly=False, ConfirmConversions=False)
-        
+        from database import get_county_and_townships_sync
+        county_info, _ = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+        replace_common_bookmarks(doc, county_name)
+
         fd = data.get("form_data", {})
         
         def _check(doc, target_text):
@@ -1324,7 +1551,14 @@ def export_waiye_inquiry(data):
         _fill_bm(doc, "xjqymc", data.get('township_name',''), True)
         _fill_bm(doc, "cjqymc", data.get('village_name',''), True)
         _fill_bm(doc, "zjqymc", data.get('group_name',''), True)
-        _fill_bm(doc, "bxwr", data.get('cbfmc',''), True)
+        
+        # 书签 bxwr -> 页面基本信息获取 (被询问人姓名)
+        bxwr_name = data.get("bxwr") or fd.get("bxwr") or fd.get("cbfmc") or real_cbfmc
+        _fill_bm(doc, "bxwr", bxwr_name, True)
+        
+        # 书签 cbfmc -> 实际承包方名称
+        _fill_bm(doc, "cbfmc", real_cbfmc, False)
+        
         _fill_bm(doc, "xb", data.get('gender','男'), True)
         _fill_bm(doc, "lxdh", data.get('lxdh',''), True)
         

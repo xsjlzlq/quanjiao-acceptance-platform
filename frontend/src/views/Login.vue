@@ -29,6 +29,15 @@
           left-icon="lock"
           clearable
         />
+
+        <!-- Cloudflare Turnstile 人机验证小组件 -->
+        <div class="turnstile-container">
+          <div id="turnstile-widget" ref="turnstileContainer"></div>
+          <div v-if="!turnstileReady" class="turnstile-loading">
+            <van-loading size="16px">人机安全验证加载中...</van-loading>
+          </div>
+        </div>
+
         <div class="login-btn-wrap">
           <van-button
             round block type="primary"
@@ -45,8 +54,9 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { showToast } from 'vant';
 import axios from 'axios';
 
 const router = useRouter();
@@ -55,13 +65,93 @@ const password = ref('');
 const loading  = ref(false);
 const errMsg   = ref('');
 
+// Turnstile 状态管理
+const turnstileContainer = ref(null);
+const turnstileToken = ref('');
+const turnstileReady = ref(false);
+const TURNSTILE_SITE_KEY = '0x4AAAAAABAhK2FC_aemQDpH';
+let widgetId = null;
+let checkInterval = null;
+
+const initTurnstile = () => {
+  if (window.turnstile) {
+    try {
+      if (widgetId !== null) {
+        window.turnstile.remove(widgetId);
+      }
+      widgetId = window.turnstile.render('#turnstile-widget', {
+        sitekey: TURNSTILE_SITE_KEY,
+        theme: 'light',
+        callback: (token) => {
+          turnstileToken.value = token;
+          turnstileReady.value = true;
+          errMsg.value = '';
+        },
+        'expired-callback': () => {
+          turnstileToken.value = '';
+          errMsg.value = '安全验证已过期，请重新验证';
+        },
+        'error-callback': () => {
+          turnstileToken.value = '';
+          errMsg.value = '安全验证加载失败，请检查网络连接';
+        }
+      });
+      turnstileReady.value = true;
+      if (checkInterval) {
+        clearInterval(checkInterval);
+        checkInterval = null;
+      }
+    } catch (e) {
+      console.error('Turnstile render error:', e);
+    }
+  }
+};
+
+onMounted(() => {
+  if (window.turnstile) {
+    initTurnstile();
+  } else {
+    // 轮询检测脚本是否加载完成
+    let attempts = 0;
+    checkInterval = setInterval(() => {
+      attempts++;
+      if (window.turnstile) {
+        initTurnstile();
+      } else if (attempts > 30) {
+        clearInterval(checkInterval);
+        checkInterval = null;
+        errMsg.value = '安全验证组件加载超时，请刷新重试';
+      }
+    }, 500);
+  }
+});
+
+onUnmounted(() => {
+  if (checkInterval) {
+    clearInterval(checkInterval);
+    checkInterval = null;
+  }
+  if (window.turnstile && widgetId !== null) {
+    try {
+      window.turnstile.remove(widgetId);
+    } catch (e) {}
+  }
+});
+
 const onLogin = async () => {
   errMsg.value = '';
+  if (!turnstileToken.value) {
+    showToast('请先完成人机安全验证');
+    errMsg.value = '请勾选/完成人机安全验证';
+    return;
+  }
+
   loading.value = true;
   try {
     const res = await axios.post('/api/auth/login', {
       username: username.value,
       password: password.value,
+      turnstile_token: turnstileToken.value
     });
     if (res.data.code === 200) {
       localStorage.setItem('auth_token',    res.data.token);
@@ -71,9 +161,18 @@ const onLogin = async () => {
       router.push('/');
     } else {
       errMsg.value = res.data.message || '登录失败';
+      // 登录失败后重置验证码
+      if (window.turnstile && widgetId !== null) {
+        window.turnstile.reset(widgetId);
+        turnstileToken.value = '';
+      }
     }
   } catch (e) {
     errMsg.value = '网络异常，请稍后重试';
+    if (window.turnstile && widgetId !== null) {
+      window.turnstile.reset(widgetId);
+      turnstileToken.value = '';
+    }
   } finally {
     loading.value = false;
   }
@@ -158,8 +257,23 @@ const onLogin = async () => {
   padding: 18px 8px 24px;
 }
 
+.turnstile-container {
+  margin: 16px 16px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 65px;
+}
+
+.turnstile-loading {
+  font-size: 12px;
+  color: #999;
+  padding: 12px 0;
+}
+
 .login-btn-wrap {
-  margin: 22px 16px 0;
+  margin: 20px 16px 0;
 }
 
 .login-btn {

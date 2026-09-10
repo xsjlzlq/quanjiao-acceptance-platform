@@ -395,7 +395,7 @@
 
         <div v-else style="text-align:center; padding: 60px 20px; color:#999;">
           <van-icon name="filter-o" size="48" color="#ccc" style="margin-bottom: 12px;" />
-          <div style="font-size: 15px;">请先在上方选择导出范围（全椒县或乡镇）</div>
+          <div style="font-size: 15px;">请先在上方选择导出范围（全县或乡镇）</div>
         </div>
       </van-tab>
     
@@ -411,14 +411,50 @@
             readonly
             label="被询问人(承包方)"
             placeholder="请选择被询问人(承包方)"
-            @click="showInquiryPicker = true"
+            @click="openInquiryContractorModal"
           />
-          <van-popup v-model:show="showInquiryPicker" round position="bottom">
-            <van-picker
-              :columns="inquiryContractorCols"
-              @cancel="showInquiryPicker = false"
-              @confirm="onInquiryContractorConfirm"
+          <van-popup v-model:show="showInquiryPicker" round position="bottom" :style="{ height: '70%', display: 'flex', flexDirection: 'column' }">
+            <div class="inquiry-picker-header">
+              <span class="picker-title">选择承包方 (共 {{ filteredInquiryContractors.length }} 户)</span>
+              <van-icon name="cross" class="close-icon" @click="showInquiryPicker = false" />
+            </div>
+            <van-search
+              v-model="inquirySearchKeyword"
+              placeholder="按编码或承包方名检索"
+              @update:model-value="inquiryCurrentPage = 1"
             />
+            <div class="inquiry-contractor-list" style="flex: 1; overflow-y: auto;">
+              <van-empty v-if="filteredInquiryContractors.length === 0" description="未找到匹配承包方" />
+              <van-cell-group v-else>
+                <van-cell
+                  v-for="cbf in pagedInquiryContractors"
+                  :key="cbf.cbfbm"
+                  clickable
+                  @click="selectInquiryContractor(cbf)"
+                >
+                  <template #title>
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                      <span style="font-weight: bold; font-size: 15px;">{{ cbf.cbfmc }}</span>
+                      <van-tag v-if="cbf.cbfbm === inquiryForm.cbfbm" type="primary">当前选择</van-tag>
+                    </div>
+                  </template>
+                  <template #label>
+                    <div style="font-size: 12px; color: #666; margin-top: 4px;">
+                      <span>编码: {{ String(cbf.cbfbm || '').slice(-4) }}</span>
+                      <span v-if="cbf.lxdh" style="margin-left: 12px;">电话: {{ cbf.lxdh }}</span>
+                    </div>
+                  </template>
+                </van-cell>
+              </van-cell-group>
+            </div>
+            <div v-if="filteredInquiryContractors.length > inquiryPageSize" style="padding: 10px 16px; border-top: 1px solid #ebedf0; background: #fff;">
+              <van-pagination
+                v-model="inquiryCurrentPage"
+                :total-items="filteredInquiryContractors.length"
+                :items-per-page="inquiryPageSize"
+                mode="simple"
+              />
+            </div>
           </van-popup>
 
           <div v-if="inquiryForm.cbfbm" style="margin-top: 20px;">
@@ -434,7 +470,8 @@
               <van-cell title="已上传的扫描件" is-link @click="downloadFile(inquiryScanUrl)" />
             </div>
 
-            <van-cell-group inset title="基本信息">              <van-field v-model="inquiryForm.cbfmc" label="被询问人姓名" placeholder="请输入被询问人姓名" />
+            <van-cell-group inset title="基本信息">
+              <van-field v-model="inquiryForm.bxwr" label="被询问人姓名" placeholder="请输入被询问人姓名" />
               <van-field name="gender" label="性别">
                 <template #input>
                   <van-radio-group v-model="inquiryForm.gender" direction="horizontal">
@@ -1163,7 +1200,7 @@ const inquiryScanUrl = ref('');
 
 const inquiryForm = ref({
       cbfbm: '',
-    cbfmc: '', gender: '男', lxdh: '',
+    cbfmc: '', bxwr: '', gender: '男', lxdh: '',
     inquiry_place: '', relationship: '', other_rel_desc: '',
     inquirer: '', bxwrqm: '', xwrqm: '', cmdbqm: '',
   questions: JSON.parse(JSON.stringify(INQUIRY_QUESTIONS)).map(q => ({...q, checked: false, answer: '', desc: ''}))
@@ -1196,107 +1233,160 @@ const inquiryForm = ref({
     inquiryForm.value[currentInquirySignType.value] = '';
   };
 
-  const inquiryContractorCols = computed(() => {
-  return groupedSamples.value.map(grp => ({
-    text: grp.cbfmc + ' (' + grp.cbfbm_short + ')',
-    value: grp.cbfbm,
-    cbfmc: grp.cbfmc
-  }));
-});
+  const groupAllContractors = ref([]);
+  const inquirySearchKeyword = ref('');
+  const inquiryCurrentPage = ref(1);
+  const inquiryPageSize = 8;
 
-const onInquiryContractorConfirm = async ({ selectedOptions }) => {
-  showInquiryPicker.value = false;
-  if (!selectedOptions || selectedOptions.length === 0) return;
-  const opt = selectedOptions[0];
-  inquiryContractorName.value = opt.text;
-  inquiryForm.value.cbfbm = opt.value;
-  
-  // load inquiry data
-  showLoadingToast({ message: '加载中...', forbidClick: true });
-  try {
-    const res = await axios.get('/api/waiye/inquiry?cbfbm=' + opt.value);
-    if (res.data.code === 200) {
-      const fd = res.data.data.form_data || {};
-      inquiryScanUrl.value = res.data.data.scan_file_url || '';
-      inquiryForm.value = {
-                  cbfbm: opt.value,
-          cbfmc: fd.cbfmc || opt.cbfmc || '', gender: fd.gender || '男', lxdh: fd.lxdh || '',
+  const loadGroupAllContractors = async (gCode) => {
+    if (!gCode) {
+      groupAllContractors.value = [];
+      return;
+    }
+    try {
+      const res = await axios.get('/api/contractors?qsdwdm=' + gCode);
+      if (res.data.code === 200) {
+        groupAllContractors.value = res.data.data || [];
+      }
+    } catch (e) {
+      console.error('加载该组全部承包方失败', e);
+    }
+  };
+
+  const filteredInquiryContractors = computed(() => {
+    const kw = inquirySearchKeyword.value.trim().toLowerCase();
+    if (!kw) return groupAllContractors.value;
+    return groupAllContractors.value.filter(c => {
+      const nameMatch = c.cbfmc && c.cbfmc.toLowerCase().includes(kw);
+      const codeMatch = c.cbfbm && String(c.cbfbm).toLowerCase().includes(kw);
+      return nameMatch || codeMatch;
+    });
+  });
+
+  const pagedInquiryContractors = computed(() => {
+    const start = (inquiryCurrentPage.value - 1) * inquiryPageSize;
+    return filteredInquiryContractors.value.slice(start, start + inquiryPageSize);
+  });
+
+  const openInquiryContractorModal = async () => {
+    if (!currentGroupCode.value) {
+      showToast('请先选择核查组别');
+      return;
+    }
+    if (groupAllContractors.value.length === 0) {
+      await loadGroupAllContractors(currentGroupCode.value);
+    }
+    inquirySearchKeyword.value = '';
+    inquiryCurrentPage.value = 1;
+    showInquiryPicker.value = true;
+  };
+
+  const selectInquiryContractor = async (cbf) => {
+    showInquiryPicker.value = false;
+    inquiryContractorName.value = `${cbf.cbfmc} (${String(cbf.cbfbm).slice(-4)})`;
+    inquiryForm.value.cbfbm = cbf.cbfbm;
+    const realCbfmc = cbf.cbfmc;
+
+    showLoadingToast({ message: '加载问询数据...', forbidClick: true });
+    try {
+      const res = await axios.get('/api/waiye/inquiry?cbfbm=' + cbf.cbfbm);
+      if (res.data.code === 200) {
+        const fd = res.data.data.form_data || {};
+        inquiryScanUrl.value = res.data.data.scan_file_url || '';
+        inquiryForm.value = {
+          cbfbm: cbf.cbfbm,
+          cbfmc: realCbfmc,
+          bxwr: fd.bxwr || fd.cbfmc || realCbfmc,
+          gender: fd.gender || '男',
+          lxdh: fd.lxdh || cbf.lxdh || '',
           inquiry_place: fd.inquiry_place || '',
           relationship: fd.relationship || '',
           other_rel_desc: fd.other_rel_desc || '',
-          inquirer: fd.inquirer || '', bxwrqm: fd.bxwrqm || '', xwrqm: fd.xwrqm || '', cmdbqm: fd.cmdbqm || '',
-                  questions: JSON.parse(JSON.stringify(INQUIRY_QUESTIONS)).map(q => {
+          inquirer: fd.inquirer || '',
+          bxwrqm: fd.bxwrqm || '',
+          xwrqm: fd.xwrqm || '',
+          cmdbqm: fd.cmdbqm || '',
+          questions: JSON.parse(JSON.stringify(INQUIRY_QUESTIONS)).map(q => {
             const savedQ = (fd.questions || []).find(sq => sq.id === q.id);
             if (savedQ) {
               return { ...q, checked: savedQ.checked || false, answer: savedQ.answer || '', desc: savedQ.desc || '' };
             }
             return { ...q, checked: false, answer: '', desc: '' };
           })
+        };
+      }
+    } catch(e) {
+      showToast('加载失败');
+    } finally {
+      closeToast();
+    }
+  };
+
+  const saveInquiry = async () => {
+    showLoadingToast({ message: '保存中...', forbidClick: true });
+    try {
+      const realCbfmc = inquiryForm.value.cbfmc || groupAllContractors.value.find(c => c.cbfbm === inquiryForm.value.cbfbm)?.cbfmc || inquiryContractorName.value.split(' ')[0];
+      const payload = {
+        cbfbm: inquiryForm.value.cbfbm,
+        township_name: currentTownshipName.value,
+        village_name: currentVillageName.value,
+        group_name: currentGroupName.value,
+        cbfmc: realCbfmc,
+        form_data: {
+          ...inquiryForm.value,
+          cbfmc: realCbfmc,
+          bxwr: inquiryForm.value.bxwr || realCbfmc
+        }
       };
+      const res = await axios.post('/api/waiye/inquiry', payload);
+      if (res.data.code === 200) {
+        showToast({ type: 'success', message: '保存成功' });
+      } else {
+        showToast(res.data.message || '保存失败');
+      }
+    } catch(e) {
+      closeToast();
+      showToast('网络异常');
     }
-  } catch(e) {
-    showToast('加载失败');
-  } finally {
-    closeToast();
-  }
-};
+  };
 
-const saveInquiry = async () => {
-  showLoadingToast({ message: '保存中...', forbidClick: true });
-  try {
-    const payload = {
-      cbfbm: inquiryForm.value.cbfbm,
-      township_name: currentTownshipName.value,
-      village_name: currentVillageName.value,
-      group_name: currentGroupName.value,
-      cbfmc: inquiryContractorName.value.split(' ')[0],
-      form_data: inquiryForm.value
-    };
-    const res = await axios.post('/api/waiye/inquiry', payload);
-    if (res.data.code === 200) {
-      showToast({ type: 'success', message: '保存成功' });
-    } else {
-      showToast(res.data.message || '保存失败');
+  const exportInquiry = async () => {
+    showLoadingToast({ message: '生成中...', forbidClick: true });
+    try {
+      // Save silently first
+      const realCbfmc = inquiryForm.value.cbfmc || groupAllContractors.value.find(c => c.cbfbm === inquiryForm.value.cbfbm)?.cbfmc || inquiryContractorName.value.split(' ')[0];
+      const payload = {
+        cbfbm: inquiryForm.value.cbfbm,
+        township_name: currentTownshipName.value,
+        village_name: currentVillageName.value,
+        group_name: currentGroupName.value,
+        cbfmc: realCbfmc,
+        form_data: {
+          ...inquiryForm.value,
+          cbfmc: realCbfmc,
+          bxwr: inquiryForm.value.bxwr || realCbfmc
+        }
+      };
+      await axios.post('/api/waiye/inquiry', payload);
+      const res = await axios.post('/api/export_waiye_inquiry', { cbfbm: inquiryForm.value.cbfbm });
+      if (res.data.code === 200) {
+        downloadFile(res.data.url);
+        showToast({ type: 'success', message: '生成成功' });
+      } else {
+        showToast(res.data.message || '生成失败');
+      }
+    } catch(e) {
+      closeToast();
+      showToast('网络异常');
     }
-  } catch(e) {
-    closeToast();
-    showToast('网络异常');
-  }
-};
-
-const exportInquiry = async () => {
-  showLoadingToast({ message: '生成中...', forbidClick: true });
-  try {
-    // Save silently first
-    const payload = {
-      cbfbm: inquiryForm.value.cbfbm,
-      township_name: currentTownshipName.value,
-      village_name: currentVillageName.value,
-      group_name: currentGroupName.value,
-      cbfmc: inquiryContractorName.value.split(' ')[0],
-      form_data: inquiryForm.value
-    };
-    await axios.post('/api/waiye/inquiry', payload);
-    const res = await axios.post('/api/export_waiye_inquiry', { cbfbm: inquiryForm.value.cbfbm });
-    if (res.data.code === 200) {
-      downloadFile(res.data.url);
-      showToast({ type: 'success', message: '生成成功' });
-    } else {
-      showToast(res.data.message || '生成失败');
-    }
-  } catch(e) {
-    closeToast();
-    showToast('网络异常');
-  }
-};
+  };
 
 const uploadInquiryScan = async (file) => {
   showLoadingToast({ message: '上传中...', forbidClick: true });
   try {
     const formData = new FormData();
     formData.append('cbfbm', inquiryForm.value.cbfbm);
-    const currentOpt = inquiryContractorCols.value.find(c => c.value === inquiryForm.value.cbfbm);
-    const cbfmc = currentOpt ? currentOpt.cbfmc : '';
+    const cbfmc = inquiryForm.value.cbfmc || groupAllContractors.value.find(c => c.cbfbm === inquiryForm.value.cbfbm)?.cbfmc || '';
     formData.append('cbfmc', cbfmc);
     let actualFile = Array.isArray(file) ? file[0] : file; actualFile = actualFile.file || actualFile; formData.append('file', actualFile);
     const res = await axios.post('/api/waiye/inquiry_scan', formData, {
@@ -1649,7 +1739,12 @@ const selectGroup = async (tName, vName, gName, gCode) => {
   selectedGroupText.value = `${tName} / ${vName} / ${gName}`;
   cascaderValue.value = gCode;
   
+  // 清空上一个组的现场问询选人状态
+  inquiryContractorName.value = '';
+  inquiryForm.value.cbfbm = '';
+  
   await loadGroupSamples(gCode, tName, vName, gName);
+  await loadGroupAllContractors(gCode);
 };
 
 const loadGroupSamples = async (gCode, tName, vName, gName) => {
@@ -2679,5 +2774,24 @@ const onExportSingleGroupAtt8 = async (grp) => {
 
 .modal-btn {
   flex: 1;
+}
+
+.inquiry-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #ebedf0;
+  background: #fff;
+}
+.inquiry-picker-header .picker-title {
+  font-size: 16px;
+  font-weight: bold;
+  color: #323233;
+}
+.inquiry-picker-header .close-icon {
+  font-size: 18px;
+  color: #969799;
+  cursor: pointer;
 }
 </style>
