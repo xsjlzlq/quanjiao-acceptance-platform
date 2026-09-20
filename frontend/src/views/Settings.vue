@@ -16,6 +16,10 @@
       <van-tab title="权限设置" v-if="isAdmin">
         <!-- 账号新增区 -->
         <van-cell-group inset title="新增账号" style="margin-top: 16px;">
+          <div style="padding: 10px 16px 4px; font-size: 13px; color: #1989fa; display: flex; align-items: center; gap: 4px;">
+            <van-icon name="cluster-o" />
+            <span>当前工作数据库：<strong>{{ currentCounty || currentDbName }} ({{ currentDbName }})</strong></span>
+          </div>
           <van-field v-model="newUsername" label="用户名" placeholder="请输入新用户名" />
           <div style="display: flex; gap: 8px; margin: 12px 16px;">
             <van-button size="small" type="primary" style="flex:1" @click="onAddSingleUser">添加账号</van-button>
@@ -24,22 +28,44 @@
             </van-uploader>
           </div>
           <div class="setting-tip">
-            批量导入说明：txt 文件每行一个用户名，初始密码统一为 <strong>123456</strong>。
+            提示：新账号将默认自动归属当前数据库【{{ currentCounty || currentDbName }}】；批量导入初始密码统一为 <strong>123456</strong>。
           </div>
         </van-cell-group>
 
         <!-- 账号列表 & 细粒度功能权限开关 -->
         <van-cell-group inset title="账号与细化功能权限管理" style="margin-top: 16px;">
-          <div v-if="usersList.length === 0" style="text-align:center; padding:20px; color:#999;">
-            加载中...
+          <!-- 加载中状态 -->
+          <div v-if="loadingUsers" style="text-align:center; padding:30px 16px; color:#1989fa;">
+            <van-loading size="20px" vertical>正在读取账号与权限列表...</van-loading>
           </div>
-          <template v-for="u in usersList" :key="u.username">
+
+          <!-- 加载失败容错重试状态 -->
+          <div v-else-if="userLoadError" style="text-align:center; padding:24px 16px;">
+            <div style="color:#ee0a24; font-size:13px; margin-bottom:10px;">{{ userLoadError }}</div>
+            <van-button size="small" type="primary" plain round icon="replay" @click="fetchUsers">
+              点击重新加载
+            </van-button>
+          </div>
+
+          <!-- 暂无数据状态 -->
+          <div v-else-if="usersList.length === 0" style="padding: 20px 0;">
+            <van-empty description="暂无账号数据" image="error" />
+          </div>
+
+          <!-- 账号列表卡片 -->
+          <template v-else v-for="u in usersList" :key="u.username">
             <van-collapse v-model="activeCollapse">
               <van-collapse-item :name="u.username">
                 <template #title>
-                  <div style="display: flex; align-items: center; gap: 8px;">
+                  <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
                     <van-tag :type="u.role === 'admin' ? 'primary' : 'default'">
                       {{ u.role === 'admin' ? '管理员' : '普通用户' }}
+                    </van-tag>
+                    <van-tag v-if="u.role === 'admin' || u.username === 'admin'" type="success" plain>
+                      管理员
+                    </van-tag>
+                    <van-tag v-else type="primary" plain>
+                      所属库: {{ u.target_db || currentDbName }}
                     </van-tag>
                     <strong>{{ u.username }}</strong>
                   </div>
@@ -252,8 +278,8 @@
       </van-tab>
 
       <!-- ================= 标签页 5：使用帮助 ================= -->
-      <van-tab title="使用帮助">
-        <van-cell-group inset title="使用手册与文档" style="margin-top: 16px;">
+      <van-tab title="使用帮助" v-if="hasPerm('help_manual') || hasPerm('help_audit_log')">
+        <van-cell-group inset title="使用手册与文档" v-if="hasPerm('help_manual')" style="margin-top: 16px;">
           <div v-if="helpFiles.length === 0" style="text-align:center; padding:30px; color:#999;">
             暂无帮助文档
           </div>
@@ -267,6 +293,20 @@
           >
             <template #right-icon>
               <van-button size="mini" type="primary" plain @click.stop="downloadHelpFile(f.name)">下载</van-button>
+            </template>
+          </van-cell>
+        </van-cell-group>
+
+        <!-- 审计日志归档下载 -->
+        <van-cell-group inset title="系统操作审计日志" v-if="hasPerm('help_audit_log')" style="margin-top: 16px;">
+          <van-cell
+            title="内外业核查审计日志文件"
+            label="实时记录核查操作时间、操作账号、核查对象及评分、签名留痕 (check_audit.log)"
+            is-link
+            @click="downloadAuditLog"
+          >
+            <template #right-icon>
+              <van-button size="mini" type="warning" plain @click.stop="downloadAuditLog">下载日志</van-button>
             </template>
           </van-cell>
         </van-cell-group>
@@ -285,6 +325,7 @@
           <iframe :src="previewUrl" class="preview-iframe" frameborder="0"></iframe>
         </div>
       </van-overlay>
+
     </van-tabs>
   </div>
 </template>
@@ -346,7 +387,15 @@ const onConfirmSwitchDb = ({ selectedOptions }) => {
       closeToast();
       if (res.data.code === 200) {
         showToast({ type: 'success', message: res.data.message });
+        if (res.data.data) {
+          localStorage.setItem('auth_target_db', res.data.data.current_db || targetDb);
+          localStorage.setItem('auth_county_name', res.data.data.county_name || targetDb);
+        }
+        window.dispatchEvent(new Event('db-switched'));
         await fetchDbConfig();
+        if (isAdmin.value) {
+          await fetchUsers();
+        }
       } else {
         showToast(res.data.message || '切换失败');
       }
@@ -413,6 +462,7 @@ const pollProgress = async () => {
           if (p.percent === 100 && p.summary) {
             showResultCards.value = true;
             showToast({ type: 'success', message: '全量数据入库成功！' });
+            window.dispatchEvent(new Event('db-switched'));
             await fetchDbConfig();
           } else if (p.error || p.percent === 100) {
             showResultCards.value = true;
@@ -445,6 +495,10 @@ const downloadHelpFile = (name) => {
   window.open('/api/help/download?file=' + encodeURIComponent(name), '_blank');
 };
 
+const downloadAuditLog = () => {
+  window.open('/api/audit-log/download', '_blank');
+};
+
 // 文件预览
 const previewVisible = ref(false);
 const previewFileName = ref('');
@@ -460,10 +514,12 @@ const PERM_MODULES = [
   {
     title: '一、任务与抽样',
     items: [
-      { key: 'tasks_sample',      label: '执行地块抽样' },
-      { key: 'tasks_clear',       label: '清空抽样数据' },
-      { key: 'tasks_export_att4', label: '导出附件4（抽样明细）' },
-      { key: 'tasks_export_att5', label: '导出附件5（抽查汇总）' },
+      { key: 'tasks_dashboard',         label: '查看进度看板' },
+      { key: 'tasks_sample',            label: '执行地块抽样' },
+      { key: 'tasks_delete_contractor', label: '管理与删除抽样农户' },
+      { key: 'tasks_clear',             label: '清空抽样数据' },
+      { key: 'tasks_export_att4',       label: '导出附件4（抽样明细）' },
+      { key: 'tasks_export_att5',       label: '导出附件5（抽查汇总）' },
     ]
   },
   {
@@ -513,6 +569,13 @@ const PERM_MODULES = [
       { key: 'settings_security', label: '安全设置（修改密码）' },
       { key: 'settings_import',   label: '全量数据入库' },
     ]
+  },
+  {
+    title: '八、使用帮助',
+    items: [
+      { key: 'help_manual',    label: '使用手册与文档' },
+      { key: 'help_audit_log', label: '系统操作审计日志' },
+    ]
   }
 ];
 
@@ -521,6 +584,8 @@ const isAdmin = computed(() => localStorage.getItem('auth_role') === 'admin');
 
 // 权限管理数据
 const usersList = ref([]);
+const loadingUsers = ref(false);
+const userLoadError = ref('');
 const newUsername = ref('');
 
 // 安全设置数据
@@ -538,12 +603,34 @@ onMounted(async () => {
 });
 
 const fetchUsers = async () => {
+  loadingUsers.value = true;
+  userLoadError.value = '';
   try {
     const res = await axios.get('/api/auth/user_perms_all');
-    if (res.data.code === 200) {
-      usersList.value = res.data.users;
+    if (res.data && res.data.code === 200) {
+      const rawUsers = res.data.users || [];
+      // 对管理员账号进行全权限补齐显示，确保 24 项权限开关全部呈绿色常开状态
+      usersList.value = rawUsers.map(u => {
+        if (u.role === 'admin' || u.username === 'admin') {
+          const fullPerms = { ...(u.perms || {}) };
+          PERM_MODULES.forEach(mod => {
+            mod.items.forEach(item => {
+              fullPerms[item.key] = true;
+            });
+          });
+          return { ...u, perms: fullPerms };
+        }
+        return u;
+      });
+    } else {
+      userLoadError.value = res.data?.message || '获取账号列表失败';
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('fetchUsers error:', e);
+    userLoadError.value = '服务器异常或连接超时，点击重新加载';
+  } finally {
+    loadingUsers.value = false;
+  }
 };
 
 // ── 权限设置 ─────────────────────────────────────────────────────────────
@@ -553,13 +640,18 @@ const onAddSingleUser = async () => {
   try {
     const res = await axios.post('/api/auth/create_user', { username: u });
     if (res.data.code === 200) {
-      showToast({ type: 'success', message: `账号 ${u} 添加成功（初始密码 123456）` });
+      const boundDb = res.data.target_db || currentCounty.value || currentDbName.value;
+      showToast({ type: 'success', message: `账号 ${u} 添加成功并归属【${boundDb}】` });
       newUsername.value = '';
       await fetchUsers();
     } else {
       showToast(res.data.message || '添加失败');
     }
-  } catch (e) { showToast('网络异常'); }
+  } catch (e) {
+    console.error('onAddSingleUser error:', e);
+    const msg = e.response?.data?.message || e.message || '添加失败，请重试';
+    showToast(msg);
+  }
 };
 
 const onImportTxt = async (file) => {
@@ -572,8 +664,14 @@ const onImportTxt = async (file) => {
       const okCount = res.data.results.filter(r => r.ok).length;
       showToast({ type: 'success', message: `批量导入成功：新增 ${okCount}/${names.length} 个账号` });
       await fetchUsers();
+    } else {
+      showToast(res.data.message || '批量导入失败');
     }
-  } catch (e) { showToast('读取文件失败'); }
+  } catch (e) {
+    console.error('onImportTxt error:', e);
+    const msg = e.response?.data?.message || e.message || '读取或导入文件失败';
+    showToast(msg);
+  }
 };
 
 const onDeleteUser = (username) => {
@@ -639,6 +737,8 @@ const onLogout = () => {
   localStorage.removeItem('auth_username');
   localStorage.removeItem('auth_role');
   localStorage.removeItem('auth_perms');
+  localStorage.removeItem('auth_target_db');
+  localStorage.removeItem('auth_county_name');
   router.push('/login');
 };
 

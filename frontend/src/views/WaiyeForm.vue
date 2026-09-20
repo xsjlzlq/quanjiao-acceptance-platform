@@ -6,7 +6,7 @@
       @click-left="$router.back()"
     />
 
-    <van-tabs v-model:active="activeTab" sticky>
+    <van-tabs v-model:active="activeTab" sticky @change="onTabChange">
       <!-- ================= 模块一：外业核查 ================= -->
       <van-tab title="外业核查">
         <!-- 步骤1：选择抽样组别 -->
@@ -103,17 +103,62 @@
                 <span class="code-tag">编码: {{ grp.cbfbm_short }}</span>
                 <van-button size="mini" type="primary" plain round style="margin-left:auto; padding: 0 10px;" @click="showMembers(grp.parcels[0])">成员详情</van-button>
               </div>
-              <div v-if="grp.lxdh" style="margin-top: 2px;">
-                <a
-                  :href="'tel:' + cleanPhone(grp.lxdh)"
-                  class="phone-call-btn"
-                  title="点击直接拨打电话"
-                  @click.stop="handlePhoneClick(grp.lxdh)"
-                  style="display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: #1989fa; text-decoration: none; padding: 4px 8px; background: rgba(25,137,250,0.08); border-radius: 4px;"
-                >
-                  <van-icon name="phone" color="#1989fa" size="16" />
-                  <span>{{ grp.lxdh }}</span>
-                </a>
+              <div class="phone-bar" style="margin-top: 4px;">
+                <!-- 正常显示模式（有电话且非修改态） -->
+                <div v-if="grp.lxdh && !editingPhoneMap[grp.cbfbm]" class="phone-display-wrap" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <a
+                    :href="'tel:' + cleanPhone(grp.lxdh)"
+                    class="phone-call-btn"
+                    title="点击直接拨打电话"
+                    @click.stop="handlePhoneClick(grp.lxdh)"
+                    style="display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: #1989fa; text-decoration: none; padding: 4px 8px; background: rgba(25,137,250,0.08); border-radius: 4px;"
+                  >
+                    <van-icon name="phone" color="#1989fa" size="16" />
+                    <span>{{ grp.lxdh }}</span>
+                  </a>
+                  <van-button 
+                    size="mini" 
+                    plain 
+                    type="default" 
+                    icon="edit" 
+                    style="height: 24px; padding: 0 6px; font-size: 12px;"
+                    @click.stop="startEditPhone(grp)"
+                  >
+                    修改
+                  </van-button>
+                </div>
+
+                <!-- 录入/编辑模式（无电话或处于编辑态） -->
+                <div v-else class="phone-edit-wrap" style="display: flex; align-items: center; gap: 6px; width: 100%; max-width: 320px;">
+                  <van-field
+                    v-model="phoneInputMap[grp.cbfbm]"
+                    type="tel"
+                    placeholder="输入联系电话"
+                    clearable
+                    left-icon="phone-o"
+                    style="padding: 4px 8px; background: #fff; border-radius: 4px; border: 1px solid #dcdfe6; flex: 1; font-size: 13px;"
+                    @keyup.enter="saveContractorPhone(grp)"
+                  />
+                  <van-button 
+                    size="mini" 
+                    type="primary" 
+                    :loading="savingPhoneMap[grp.cbfbm]"
+                    style="height: 28px; padding: 0 10px; font-size: 12px; white-space: nowrap;"
+                    @click.stop="saveContractorPhone(grp)"
+                  >
+                    保存
+                  </van-button>
+                  <van-button 
+                    v-if="grp.lxdh"
+                    size="mini" 
+                    plain
+                    type="default" 
+                    style="height: 28px; padding: 0 6px; font-size: 12px; white-space: nowrap;"
+                    @click.stop="cancelEditPhone(grp)"
+                  >
+                    取消
+                  </van-button>
+                </div>
               </div>
             </div>
 
@@ -401,175 +446,270 @@
     
       <!-- ================= Tab 3: 现场问询 ================= -->
       <van-tab title="现场问询" v-if="hasPerm('waiye_inquiry')">
-        <div v-if="!currentGroupCode" class="empty-state">
-          <van-empty description="请先在上方选择核查组别" />
-        </div>
-        <div v-else style="padding: 16px;">
+        <!-- 步骤1：选择问询行政村 -->
+        <van-cell-group inset style="margin-top: 10px;">
           <van-field
-            v-model="inquiryContractorName"
+            v-model="inquiryVillageText"
             is-link
             readonly
-            label="被询问人(承包方)"
-            placeholder="请选择被询问人(承包方)"
-            @click="openInquiryContractorModal"
+            label="问询行政村"
+            placeholder="请选择行政村"
+            @click="showInquiryVillagePicker = true"
           />
-          <van-popup v-model:show="showInquiryPicker" round position="bottom" :style="{ height: '70%', display: 'flex', flexDirection: 'column' }">
-            <div class="inquiry-picker-header">
-              <span class="picker-title">选择承包方 (共 {{ filteredInquiryContractors.length }} 户)</span>
-              <van-icon name="cross" class="close-icon" @click="showInquiryPicker = false" />
+          <van-popup v-model:show="showInquiryVillagePicker" round position="bottom">
+            <van-cascader
+              v-model="inquiryVillageCascaderValue"
+              title="选择问询行政村"
+              :options="inquiryVillageOptions"
+              @close="showInquiryVillagePicker = false"
+              @finish="onInquiryVillageFinish"
+            />
+          </van-popup>
+        </van-cell-group>
+
+        <!-- 步骤2：以村为单位拍照上传现场会照片（村级常驻区域，刷新自动回显，支持导出 .docx） -->
+        <div v-if="inquiryVillageCode" style="margin: 12px 16px 0;">
+          <van-cell-group inset title="现场会与问询核查照片 (以村为单位)" style="margin: 0;">
+            <div style="padding: 12px 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <div style="font-size: 13px; color: #323233; font-weight: bold;">
+                  📸 【{{ inquiryTownshipName }} {{ inquiryVillageName }}】现场照片 ({{ villagePhotoFileList.length }} 张)
+                </div>
+                <van-button 
+                  size="mini" 
+                  type="primary" 
+                  plain 
+                  round 
+                  icon="down"
+                  :loading="exportingVillageDoc"
+                  @click="exportVillagePhotosDoc"
+                >
+                  导出现场会照片.docx
+                </van-button>
+              </div>
+              <div style="font-size: 12px; color: #969799; margin-bottom: 12px; line-height: 1.5;">
+                请拍摄或上传该村延包工作现场会、村民代表大会及入户核对现场照片。刷新页面自动持久化回显，并可一键导出Word文档：
+              </div>
+              <van-uploader
+                v-model="villagePhotoFileList"
+                multiple
+                :max-count="9"
+                accept="image/*"
+                :preview-image="true"
+                :after-read="onUploadVillagePhoto"
+                @delete="onDeleteVillagePhoto"
+              />
             </div>
+          </van-cell-group>
+        </div>
+
+        <!-- 步骤3：本村承包方列表面板（当未选中具体农户时直接展示，10个一页，支持按名称检索） -->
+        <div v-if="!inquiryForm.cbfbm" style="padding: 12px 16px;">
+          <div v-if="!inquiryVillageCode" class="empty-box" style="padding: 40px 0;">
+            <van-icon name="guide-o" size="48" color="#1989fa" style="margin-bottom: 12px;" />
+            <div style="font-size: 15px; color: #323233; margin-bottom: 8px;">请先在上方选择问询行政村</div>
+            <div style="font-size: 13px; color: #969799;">系统将以村为单位列出全村所有承包农户进行问询</div>
+          </div>
+
+          <div v-else>
+            <!-- 搜索框 -->
             <van-search
               v-model="inquirySearchKeyword"
-              placeholder="按编码或承包方名检索"
-              @update:model-value="inquiryCurrentPage = 1"
+              placeholder="输入承包方名称或编码检索"
+              shape="round"
+              @input="inquiryCurrentPage = 1"
             />
-            <div class="inquiry-contractor-list" style="flex: 1; overflow-y: auto;">
-              <van-empty v-if="filteredInquiryContractors.length === 0" description="未找到匹配承包方" />
-              <van-cell-group v-else>
+
+            <!-- 承包方列表（10个一页） -->
+            <div style="margin-top: 8px;">
+              <div v-if="loadingVillageContractors" style="text-align: center; padding: 30px 0; color: #1989fa;">
+                <van-loading size="20px" vertical>正在加载本村全部承包方清单...</van-loading>
+              </div>
+
+              <div v-else-if="filteredInquiryContractors.length === 0" style="padding: 20px 0;">
+                <van-empty description="未找到符合条件的承包方" image="search" />
+              </div>
+
+              <van-cell-group inset v-else style="margin: 0;">
                 <van-cell
                   v-for="cbf in pagedInquiryContractors"
                   :key="cbf.cbfbm"
                   clickable
                   @click="selectInquiryContractor(cbf)"
+                  style="padding: 12px 14px;"
                 >
                   <template #title>
                     <div style="display: flex; align-items: center; justify-content: space-between;">
-                      <span style="font-weight: bold; font-size: 15px;">{{ cbf.cbfmc }}</span>
-                      <van-tag v-if="cbf.cbfbm === inquiryForm.cbfbm" type="primary">当前选择</van-tag>
+                      <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-weight: bold; font-size: 16px; color: #323233;">{{ cbf.cbfmc }}</span>
+                        <van-tag type="primary" plain size="medium" v-if="cbf.group_name">{{ cbf.group_name }}</van-tag>
+                      </div>
+                      <van-button size="mini" type="primary" plain round>进入问询</van-button>
                     </div>
                   </template>
                   <template #label>
                     <div style="font-size: 12px; color: #666; margin-top: 4px;">
-                      <span>编码: {{ String(cbf.cbfbm || '').slice(-4) }}</span>
-                      <span v-if="cbf.lxdh" style="margin-left: 12px;">电话: {{ cbf.lxdh }}</span>
+                      <span>编码: {{ String(cbf.cbfbm || '').slice(-4) }} ({{ cbf.cbfbm }})</span>
+                      <span v-if="cbf.lxdh" style="margin-left: 10px;">电话: {{ cbf.lxdh }}</span>
                     </div>
                   </template>
                 </van-cell>
               </van-cell-group>
-            </div>
-            <div v-if="filteredInquiryContractors.length > inquiryPageSize" style="padding: 10px 16px; border-top: 1px solid #ebedf0; background: #fff;">
-              <van-pagination
-                v-model="inquiryCurrentPage"
-                :total-items="filteredInquiryContractors.length"
-                :items-per-page="inquiryPageSize"
-                mode="simple"
-              />
-            </div>
-          </van-popup>
 
-          <div v-if="inquiryForm.cbfbm" style="margin-top: 20px;">
-            <div style="display: flex; gap: 8px; margin-bottom: 16px;">
-              <van-button type="primary" size="small" @click="saveInquiry">保存问询记录</van-button>
-              <van-button type="success" size="small" plain @click="exportInquiry">导出附件</van-button>
-              <van-uploader accept=".pdf,image/*" result-type="file" :after-read="uploadInquiryScan">
-                <van-button type="warning" size="small" plain>上传扫描件</van-button>
-              </van-uploader>
-            </div>
-            
-            <div v-if="inquiryScanUrl" style="margin-bottom: 16px;">
-              <van-cell title="已上传的扫描件" is-link @click="downloadFile(inquiryScanUrl)" />
-            </div>
-
-            <van-cell-group inset title="基本信息">
-              <van-field v-model="inquiryForm.bxwr" label="被询问人姓名" placeholder="请输入被询问人姓名" />
-              <van-field name="gender" label="性别">
-                <template #input>
-                  <van-radio-group v-model="inquiryForm.gender" direction="horizontal">
-                    <van-radio name="男">男</van-radio>
-                    <van-radio name="女">女</van-radio>
-                  </van-radio-group>
-</template>
-              </van-field>
-              <van-field v-model="inquiryForm.lxdh" label="联系电话" placeholder="请输入联系电话" />
-              
-              <van-field name="inquiry_place" label="询问地点">
-                <template #input>
-                  <van-radio-group v-model="inquiryForm.inquiry_place" direction="horizontal">
-                    <van-radio name="农户家中">农户家中</van-radio>
-                    <van-radio name="田间地头">田间地头</van-radio>
-                    <van-radio name="村委会">村委会</van-radio>
-                  </van-radio-group>
-</template>
-              </van-field>
-
-              <van-field name="relationship" label="与代表关系">
-                <template #input>
-                  <van-radio-group v-model="inquiryForm.relationship" direction="horizontal">
-                    <van-radio name="本人">本人</van-radio>
-                    <van-radio name="配偶">配偶</van-radio>
-                    <van-radio name="子女">子女</van-radio>
-                    <van-radio name="其他亲属">其他亲属</van-radio>
-                  </van-radio-group>
-</template>
-              </van-field>
-              <van-field v-if="inquiryForm.relationship === '其他亲属'" v-model="inquiryForm.other_rel_desc" label="亲属说明" placeholder="填写亲属关系" />
-              
-              <van-field v-model="inquiryForm.inquirer" label="询问人" placeholder="外业核查人员" />
-              
-            </van-cell-group>
-
-            
-            <div style="margin-top: 20px; font-weight: bold; margin-left: 16px;">问询内容（可根据实际勾选、补充记录）</div>
-            
-            <van-cell-group v-for="q in currentQuestions" :key="q.id" inset style="margin-top: 16px; margin-bottom: 16px;">
-              <template #title>
-                <van-checkbox v-model="q.checked" shape="square">{{ q.q }}</van-checkbox>
-</template>
-              <div :style="{ opacity: q.checked ? 1 : 0.4, pointerEvents: q.checked ? 'auto' : 'none' }">
-                <van-field v-if="q.opts.length > 0" :name="'q_choice_'+q.id">
-                  <template #input>
-                    <van-radio-group v-model="q.answer" direction="horizontal">
-                      <van-radio v-for="opt in q.opts" :key="opt" :name="opt" style="margin-bottom: 8px;">{{ opt }}</van-radio>
-                    </van-radio-group></template>
-                </van-field>
-                <van-field v-if="q.has_desc" v-model="q.desc" :label="q.desc_label" type="textarea" rows="2" autosize />
+              <!-- 分页器（10个一页） -->
+              <div v-if="filteredInquiryContractors.length > inquiryPageSize" style="margin-top: 14px; padding: 10px 16px; background: #fff; border-radius: 8px;">
+                <van-pagination
+                  v-model="inquiryCurrentPage"
+                  :total-items="filteredInquiryContractors.length"
+                  :items-per-page="inquiryPageSize"
+                  mode="simple"
+                />
+                <div style="text-align: center; font-size: 12px; color: #969799; margin-top: 6px;">
+                  共 {{ filteredInquiryContractors.length }} 户，当前第 {{ inquiryCurrentPage }} / {{ Math.ceil(filteredInquiryContractors.length / inquiryPageSize) }} 页
+                </div>
               </div>
-            </van-cell-group>
-            
-                        <van-pagination 
-              v-model="currentPage" 
-              :total-items="40" 
-              :items-per-page="10" 
-              style="margin: 20px 0;"
-            />
-
-            <div style="margin-top: 20px; font-weight: bold; margin-left: 16px; margin-bottom: 10px;">被询问人确认</div>
-            <van-cell-group inset style="margin-bottom: 30px;">
-              <div style="display: flex; justify-content: space-between; padding: 16px;">
-                
-                <!-- bxwrqm -->
-                <div style="flex: 1; margin: 0 4px; text-align: center;">
-                  <div style="font-size: 12px; margin-bottom: 8px;">被询问人签名</div>
-                  <div @click="openInquirySign('bxwrqm')" style="height: 60px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 4px; overflow: hidden; cursor: pointer;">
-                    <img v-if="inquiryForm.bxwrqm" :src="inquiryForm.bxwrqm" style="max-height: 100%; max-width: 100%;" />
-                    <van-icon v-else name="edit" size="24" color="#ccc" />
-                  </div>
-                </div>
-
-                <!-- xwrqm -->
-                <div style="flex: 1; margin: 0 4px; text-align: center;">
-                  <div style="font-size: 12px; margin-bottom: 8px;">询问人签名</div>
-                  <div @click="openInquirySign('xwrqm')" style="height: 60px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 4px; overflow: hidden; cursor: pointer;">
-                    <img v-if="inquiryForm.xwrqm" :src="inquiryForm.xwrqm" style="max-height: 100%; max-width: 100%;" />
-                    <van-icon v-else name="edit" size="24" color="#ccc" />
-                  </div>
-                </div>
-
-                <!-- cmdbqm -->
-                <div style="flex: 1; margin: 0 4px; text-align: center;">
-                  <div style="font-size: 12px; margin-bottom: 8px;">村民代表签名</div>
-                  <div @click="openInquirySign('cmdbqm')" style="height: 60px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 4px; overflow: hidden; cursor: pointer;">
-                    <img v-if="inquiryForm.cmdbqm" :src="inquiryForm.cmdbqm" style="max-height: 100%; max-width: 100%;" />
-                    <van-icon v-else name="edit" size="24" color="#ccc" />
-                  </div>
-                </div>
-
-              </div>
-            </van-cell-group>
-
             </div>
           </div>
-        </van-tab>
+        </div>
+
+        <!-- 步骤4：选定农户后的问询表单详情与现场拍照 -->
+        <div v-else style="padding: 12px 16px;">
+          <!-- 当前农户信息顶栏与切换按钮 -->
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: #eef5fe; border-radius: 8px; margin-bottom: 14px;">
+            <div>
+              <div style="font-size: 16px; font-weight: bold; color: #1989fa;">
+                {{ inquiryForm.cbfmc }}
+                <van-tag type="primary" size="medium" style="margin-left: 6px;" v-if="inquiryForm.group_name">{{ inquiryForm.group_name }}</van-tag>
+              </div>
+              <div style="font-size: 12px; color: #666; margin-top: 2px;">
+                {{ inquiryTownshipName }} / {{ inquiryVillageName }} | 编码: {{ String(inquiryForm.cbfbm).slice(-4) }}
+              </div>
+            </div>
+            <van-button size="small" plain round type="primary" icon="exchange" @click="backToContractorList">
+              更换承包方
+            </van-button>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+            <van-button type="primary" size="small" @click="saveInquiry">保存问询记录</van-button>
+            <van-button type="success" size="small" plain @click="exportInquiry">导出问询笔录</van-button>
+            <van-uploader accept=".pdf,image/*" result-type="file" :after-read="uploadInquiryScan">
+              <van-button type="warning" size="small" plain>上传扫描件</van-button>
+            </van-uploader>
+          </div>
+          
+          <div v-if="inquiryScanUrl" style="margin-bottom: 16px;">
+            <van-cell title="已上传的扫描件" is-link @click="downloadFile(inquiryScanUrl)" />
+          </div>
+
+          <!-- 基本信息 -->
+          <van-cell-group inset title="基本信息">
+            <van-field v-model="inquiryForm.bxwr" label="被询问人姓名" placeholder="请输入被询问人姓名" />
+            <van-field name="gender" label="性别">
+              <template #input>
+                <van-radio-group v-model="inquiryForm.gender" direction="horizontal">
+                  <van-radio name="男">男</van-radio>
+                  <van-radio name="女">女</van-radio>
+                </van-radio-group>
+              </template>
+            </van-field>
+            <van-field v-model="inquiryForm.lxdh" label="联系电话" placeholder="请输入联系电话" />
+            
+            <van-field name="inquiry_place" label="询问地点">
+              <template #input>
+                <van-radio-group v-model="inquiryForm.inquiry_place" direction="horizontal">
+                  <van-radio name="农户家中">农户家中</van-radio>
+                  <van-radio name="田间地头">田间地头</van-radio>
+                  <van-radio name="村委会">村委会</van-radio>
+                </van-radio-group>
+              </template>
+            </van-field>
+
+            <van-field name="relationship" label="与代表关系">
+              <template #input>
+                <van-radio-group v-model="inquiryForm.relationship" direction="horizontal">
+                  <van-radio name="本人">本人</van-radio>
+                  <van-radio name="配偶">配偶</van-radio>
+                  <van-radio name="子女">子女</van-radio>
+                  <van-radio name="其他亲属">其他亲属</van-radio>
+                </van-radio-group>
+              </template>
+            </van-field>
+            <van-field v-if="inquiryForm.relationship === '其他亲属'" v-model="inquiryForm.other_rel_desc" label="亲属说明" placeholder="填写亲属关系" />
+          </van-cell-group>
+
+          <!-- 问询内容题目 -->
+          <div style="margin-top: 20px; font-weight: bold; margin-left: 16px;">问询内容（可根据实际勾选、补充记录）</div>
+          
+          <van-cell-group v-for="q in currentQuestions" :key="q.id" inset style="margin-top: 16px; margin-bottom: 16px;">
+            <template #title>
+              <van-checkbox v-model="q.checked" shape="square">{{ q.q }}</van-checkbox>
+            </template>
+            <div :style="{ opacity: q.checked ? 1 : 0.4, pointerEvents: q.checked ? 'auto' : 'none' }">
+              <van-field v-if="q.opts.length > 0" :name="'q_choice_'+q.id">
+                <template #input>
+                  <van-radio-group v-model="q.answer" direction="horizontal">
+                    <van-radio v-for="opt in q.opts" :key="opt" :name="opt" style="margin-bottom: 8px;">{{ opt }}</van-radio>
+                  </van-radio-group>
+                </template>
+              </van-field>
+              <van-field v-if="q.has_desc" v-model="q.desc" :label="q.desc_label" type="textarea" rows="2" autosize />
+            </div>
+          </van-cell-group>
+          
+          <van-pagination 
+            v-model="currentPage" 
+            :total-items="40" 
+            :items-per-page="10" 
+            style="margin: 20px 0;"
+          />
+
+          <!-- 电子签名区 -->
+          <div style="margin-top: 20px; font-weight: bold; margin-left: 16px; margin-bottom: 10px;">被询问人确认</div>
+          <van-cell-group inset style="margin-bottom: 30px;">
+            <div style="display: flex; justify-content: space-around; padding: 16px; gap: 16px;">
+              <!-- bxwrqm -->
+              <div style="flex: 1; max-width: 220px; text-align: center;">
+                <div style="font-size: 13px; font-weight: 500; margin-bottom: 8px; color: #323233;">被询问人签名</div>
+                <div @click="openInquirySign('bxwrqm')" style="height: 68px; border: 1px dashed #c8c9cc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 6px; overflow: hidden; cursor: pointer;">
+                  <img v-if="inquiryForm.bxwrqm" :src="inquiryForm.bxwrqm" style="max-height: 100%; max-width: 100%;" />
+                  <van-icon v-else name="edit" size="24" color="#969799" />
+                </div>
+              </div>
+
+              <!-- xwrqm -->
+              <div style="flex: 1; max-width: 220px; text-align: center;">
+                <div style="font-size: 13px; font-weight: 500; margin-bottom: 8px; color: #323233;">询问人签名</div>
+                <div @click="openInquirySign('xwrqm')" style="height: 68px; border: 1px dashed #c8c9cc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 6px; overflow: hidden; cursor: pointer;">
+                  <img v-if="inquiryForm.xwrqm" :src="inquiryForm.xwrqm" style="max-height: 100%; max-width: 100%;" />
+                  <van-icon v-else name="edit" size="24" color="#969799" />
+                </div>
+              </div>
+            </div>
+          </van-cell-group>
+
+          <!-- 现场问询核查照片 -->
+          <div style="margin-top: 20px; font-weight: bold; margin-left: 16px; margin-bottom: 10px;">
+            📸 现场问询与入户核查照片 ({{ inquiryPhotoFileList.length }} 张)
+          </div>
+          <van-cell-group inset style="margin-bottom: 30px;">
+            <div style="padding: 14px 16px;">
+              <div style="font-size: 12px; color: #969799; margin-bottom: 12px; line-height: 1.5;">
+                请拍摄或上传该农户入户问询、签字确认现场照片。保存后将自动附在问询笔录 Word 尾部：
+              </div>
+              <van-uploader
+                v-model="inquiryPhotoFileList"
+                multiple
+                :max-count="9"
+                accept="image/*"
+                :preview-image="true"
+                :after-read="onUploadInquiryPhoto"
+                @delete="onDeleteInquiryPhoto"
+              />
+            </div>
+          </van-cell-group>
+        </div>
+      </van-tab>
 
     </van-tabs>
 
@@ -679,7 +819,20 @@ import { hasPerm } from '../utils/auth';
 import { showToast, showLoadingToast, closeToast } from 'vant';
 import axios from 'axios';
 
-const activeTab = ref(0);
+const getSavedTab = () => {
+  try {
+    const t = sessionStorage.getItem('waiye_active_tab');
+    return t !== null ? Number(t) : 0;
+  } catch (e) {
+    return 0;
+  }
+};
+const activeTab = ref(getSavedTab());
+const onTabChange = (idx) => {
+  try {
+    sessionStorage.setItem('waiye_active_tab', String(idx));
+  } catch (e) {}
+};
 
   const INQUIRY_QUESTIONS = [
   {
@@ -1194,199 +1347,619 @@ const exportingGroupAtt8 = ref(false);
 
 
 // ================= Tab 3: 现场问询逻辑 =================
-const showInquiryPicker = ref(false);
+const inquiryTownshipName = ref('');
+const inquiryVillageName = ref('');
+const inquiryVillageCode = ref('');
+const inquiryVillageText = ref('');
+const showInquiryVillagePicker = ref(false);
+const inquiryVillageCascaderValue = ref('');
+
 const inquiryContractorName = ref('');
 const inquiryScanUrl = ref('');
+const inquiryPhotoFileList = ref([]);
 
 const inquiryForm = ref({
-      cbfbm: '',
-    cbfmc: '', bxwr: '', gender: '男', lxdh: '',
-    inquiry_place: '', relationship: '', other_rel_desc: '',
-    inquirer: '', bxwrqm: '', xwrqm: '', cmdbqm: '',
+  cbfbm: '',
+  cbfmc: '',
+  group_name: '',
+  bxwr: '',
+  gender: '男',
+  lxdh: '',
+  inquiry_place: '',
+  relationship: '',
+  other_rel_desc: '',
+  inquirer: '',
+  bxwrqm: '',
+  xwrqm: '',
+  photos: [],
   questions: JSON.parse(JSON.stringify(INQUIRY_QUESTIONS)).map(q => ({...q, checked: false, answer: '', desc: ''}))
 });
 
+const inquirySignModal = ref(false);
+const inquirySignReady = ref(false);
+const currentInquirySignType = ref('');
+const currentInquirySignLabel = computed(() => {
+  if (currentInquirySignType.value === 'bxwrqm') return '被询问人';
+  if (currentInquirySignType.value === 'xwrqm') return '询问人';
+  return '';
+});
 
-  const inquirySignModal = ref(false);
-  const inquirySignReady = ref(false);
-  const currentInquirySignType = ref('');
-  const currentInquirySignLabel = computed(() => {
-    if (currentInquirySignType.value === 'bxwrqm') return '被询问人';
-    if (currentInquirySignType.value === 'xwrqm') return '询问人';
-    if (currentInquirySignType.value === 'cmdbqm') return '村民代表';
-    return '';
+const openInquirySign = (type) => {
+  currentInquirySignType.value = type;
+  inquirySignModal.value = true;
+};
+const closeInquirySignModal = () => {
+  inquirySignModal.value = false;
+};
+const onInquirySignSubmit = (data) => {
+  inquiryForm.value[currentInquirySignType.value] = data.image;
+  showToast('签名已暂存，请点击保存问询记录生效');
+  closeInquirySignModal();
+};
+const onInquirySignClear = () => {
+  inquiryForm.value[currentInquirySignType.value] = '';
+};
+
+const villageAllContractors = ref([]);
+const loadingVillageContractors = ref(false);
+const inquirySearchKeyword = ref('');
+const inquiryCurrentPage = ref(1);
+const inquiryPageSize = 10; // 规定每页10个承包方
+
+// 村级现场会核查照片管理状态
+const villagePhotoFileList = ref([]);
+const exportingVillageDoc = ref(false);
+
+const loadVillagePhotos = async (vCode) => {
+  if (!vCode) {
+    villagePhotoFileList.value = [];
+    return;
+  }
+  try {
+    const res = await axios.get('/api/waiye/village_photos?village_code=' + vCode);
+    if (res.data.code === 200) {
+      const photos = res.data.photos || [];
+      villagePhotoFileList.value = photos.map((url, idx) => ({
+        url: url,
+        isImage: true,
+        name: `现场照片_${idx + 1}`
+      }));
+    }
+  } catch (e) {
+    console.error('加载村级现场会照片失败:', e);
+  }
+};
+
+// 客户端高保真快速预压缩（将手机动辄 10MB 的原图毫秒级压至 300~600KB，大幅提升上传速度）
+const compressImageClient = (file) => {
+  return new Promise((resolve) => {
+    if (!file) return resolve(file);
+    const rawFile = file.file || file;
+    // 非图片或小于 400KB 直接返回原文件
+    if (!rawFile.type || !rawFile.type.startsWith('image/') || rawFile.size < 400 * 1024) {
+      return resolve(rawFile);
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        // 长边上限 1600px，完全满足 Word 插入与手机高保真查验
+        const maxDim = 1600;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            resolve(rawFile);
+          } else {
+            const compressedFile = new File([blob], rawFile.name || 'photo.jpg', {
+              type: 'image/jpeg',
+              lastModified: Date.now()
+            });
+            resolve(compressedFile);
+          }
+        }, 'image/jpeg', 0.82);
+      };
+      img.onerror = () => resolve(rawFile);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(rawFile);
+    reader.readAsDataURL(rawFile);
+  });
+};
+
+const onUploadVillagePhoto = async (file) => {
+  if (!inquiryVillageCode.value) {
+    showToast('请先选择行政村');
+    return;
+  }
+  const filesToUpload = Array.isArray(file) ? file : [file];
+  if (filesToUpload.length === 0) return;
+
+  // 为所有待上传项初始化状态
+  filesToUpload.forEach(f => {
+    f.status = 'uploading';
+    f.message = '压缩上传中...';
   });
 
-  const openInquirySign = (type) => {
-    currentInquirySignType.value = type;
-    inquirySignModal.value = true;
-  };
-  const closeInquirySignModal = () => {
-    inquirySignModal.value = false;
-  };
-  const onInquirySignSubmit = (data) => {
-    inquiryForm.value[currentInquirySignType.value] = data.image;
-    showToast('签名已暂存，请点击保存问询记录生效');
-    closeInquirySignModal();
-  };
-  const onInquirySignClear = () => {
-    inquiryForm.value[currentInquirySignType.value] = '';
-  };
+  let successCount = 0;
+  let failCount = 0;
 
-  const groupAllContractors = ref([]);
-  const inquirySearchKeyword = ref('');
-  const inquiryCurrentPage = ref(1);
-  const inquiryPageSize = 8;
-
-  const loadGroupAllContractors = async (gCode) => {
-    if (!gCode) {
-      groupAllContractors.value = [];
-      return;
-    }
+  // 并行上传所有文件，网络与压缩不再串行排队阻塞
+  await Promise.all(filesToUpload.map(async (item) => {
     try {
-      const res = await axios.get('/api/contractors?qsdwdm=' + gCode);
-      if (res.data.code === 200) {
-        groupAllContractors.value = res.data.data || [];
-      }
-    } catch (e) {
-      console.error('加载该组全部承包方失败', e);
-    }
-  };
+      const fileObj = item.file || item;
+      // 客户端先执行毫秒级预压缩
+      const compressedFile = await compressImageClient(fileObj);
+      const formData = new FormData();
+      formData.append('file', compressedFile);
 
-  const filteredInquiryContractors = computed(() => {
-    const kw = inquirySearchKeyword.value.trim().toLowerCase();
-    if (!kw) return groupAllContractors.value;
-    return groupAllContractors.value.filter(c => {
-      const nameMatch = c.cbfmc && c.cbfmc.toLowerCase().includes(kw);
-      const codeMatch = c.cbfbm && String(c.cbfbm).toLowerCase().includes(kw);
-      return nameMatch || codeMatch;
+      const res = await axios.post('/api/upload_evidence', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 60000
+      });
+      if (res.data.code === 200 && res.data.url) {
+        item.url = res.data.url;
+        item.status = 'done';
+        item.message = '';
+        item.isImage = true;
+        successCount++;
+      } else {
+        item.status = 'failed';
+        item.message = '失败';
+        failCount++;
+      }
+    } catch (err) {
+      console.error('上传村级照片失败:', err);
+      item.status = 'failed';
+      item.message = '失败';
+      failCount++;
+    }
+  }));
+
+  // 严格提取所有已完成落盘、非 blob、非 data 的服务器有效 URL
+  const validPhotoUrls = villagePhotoFileList.value
+    .map(f => f.url || (f.response && f.response.url))
+    .filter(u => typeof u === 'string' && u.startsWith('/uploads/'));
+
+  try {
+    await axios.post('/api/waiye/village_photos', {
+      village_code: inquiryVillageCode.value,
+      township_name: inquiryTownshipName.value,
+      village_name: inquiryVillageName.value,
+      photos: validPhotoUrls
     });
+    if (failCount === 0) {
+      showToast({ type: 'success', message: `成功上传 ${successCount} 张照片` });
+    } else {
+      showToast(`上传完成: ${successCount} 张成功, ${failCount} 张失败`);
+    }
+  } catch (saveErr) {
+    console.error('保存村级照片列表失败:', saveErr);
+    showToast('照片已上传但保存到村记录失败');
+  }
+};
+
+const onDeleteVillagePhoto = async (file, detail) => {
+  // 提取被移除文件的 url，以便后端删除物理文件
+  const removedUrl = file.url || (file.response && file.response.url);
+
+  // Vant 4 的 van-uploader 在触发 @delete 时，v-model 绑定的 villagePhotoFileList 已经移除了该元素，
+  // 此时直接提取现存的有效 URL 即为删除后的最终列表（包含删除最后一张时变为空数组的情形）
+  const currentPhotoUrls = villagePhotoFileList.value
+    .map(f => f.url || (f.response && f.response.url))
+    .filter(u => typeof u === 'string' && u.startsWith('/uploads/') && u !== removedUrl);
+
+  // 立即同步持久化删除后的照片列表到数据库
+  try {
+    await axios.post('/api/waiye/village_photos', {
+      village_code: inquiryVillageCode.value,
+      township_name: inquiryTownshipName.value,
+      village_name: inquiryVillageName.value,
+      photos: currentPhotoUrls
+    });
+    if (removedUrl && typeof removedUrl === 'string' && removedUrl.startsWith('/uploads/')) {
+      axios.post('/api/delete_evidence', { url: removedUrl }).catch(() => {});
+    }
+    showToast('照片已移除');
+  } catch (e) {
+    console.error('村级照片删除同步失败:', e);
+    showToast('删除保存失败');
+  }
+};
+
+const exportVillagePhotosDoc = async () => {
+  if (!inquiryVillageCode.value) {
+    showToast('请先选择行政村');
+    return;
+  }
+  const currentPhotoUrls = villagePhotoFileList.value
+    .map(f => f.url || (f.response && f.response.url))
+    .filter(u => typeof u === 'string' && u.startsWith('/uploads/'));
+
+  exportingVillageDoc.value = true;
+  showLoadingToast({ message: '正在生成现场会照片文档...', forbidClick: true });
+  try {
+    const res = await axios.post('/api/export_village_meeting_photos', {
+      village_code: inquiryVillageCode.value,
+      township_name: inquiryTownshipName.value,
+      village_name: inquiryVillageName.value,
+      photos: currentPhotoUrls
+    });
+    if (res.data.code === 200 && res.data.url) {
+      downloadFile(res.data.url);
+      showToast({ type: 'success', message: '现场会照片.docx 生成成功！' });
+    } else {
+      showToast(res.data.message || '生成失败');
+    }
+  } catch (err) {
+    console.error('导出现场会照片失败:', err);
+    showToast('生成请求失败');
+  } finally {
+    closeToast();
+    exportingVillageDoc.value = false;
+  }
+};
+
+// 双级级联选择器数据源 (乡镇 -> 行政村)
+const inquiryVillageOptions = computed(() => {
+  return (cascaderOptions.value || []).map(ts => ({
+    text: ts.text,
+    value: ts.value,
+    children: (ts.children || []).map(v => ({
+      text: v.text,
+      value: v.value,
+      villageCode: v.value,
+      villageName: v.village_name || v.text,
+      townshipName: ts.text
+    }))
+  }));
+});
+
+const onInquiryVillageFinish = async ({ selectedOptions }) => {
+  showInquiryVillagePicker.value = false;
+  if (!selectedOptions || selectedOptions.length < 2) return;
+  const ts = selectedOptions[0];
+  const vill = selectedOptions[1];
+  const realCode = vill.villageCode || vill.value || '';
+  await setInquiryVillage(ts.text, vill.villageName || vill.text, realCode);
+};
+
+const setInquiryVillage = async (tName, vName, vCode) => {
+  inquiryTownshipName.value = tName;
+  inquiryVillageName.value = vName;
+  inquiryVillageCode.value = vCode;
+  inquiryVillageText.value = `${tName} / ${vName}`;
+  inquiryVillageCascaderValue.value = vCode;
+
+  try {
+    sessionStorage.setItem('active_inquiry_vcode', vCode);
+    sessionStorage.setItem('active_inquiry_tname', tName);
+    sessionStorage.setItem('active_inquiry_vname', vName);
+  } catch (e) {}
+
+  // 清空选中农户与表单状态，回到本村承包方清单
+  backToContractorList();
+
+  // 1. 加载本村全量承包方（传入区划代码或村名）
+  await loadVillageAllContractors(vCode || vName);
+
+  // 2. 加载本村现场会核查照片
+  await loadVillagePhotos(vCode);
+};
+
+const loadVillageAllContractors = async (vCode) => {
+  if (!vCode) {
+    villageAllContractors.value = [];
+    return;
+  }
+  loadingVillageContractors.value = true;
+  try {
+    const res = await axios.get('/api/contractors?qsdwdm=' + vCode);
+    if (res.data.code === 200) {
+      villageAllContractors.value = res.data.data || [];
+    }
+  } catch (e) {
+    console.error('加载该村全部承包方失败', e);
+    showToast('加载承包方失败');
+  } finally {
+    loadingVillageContractors.value = false;
+  }
+};
+
+const filteredInquiryContractors = computed(() => {
+  const kw = inquirySearchKeyword.value.trim().toLowerCase();
+  if (!kw) return villageAllContractors.value;
+  return villageAllContractors.value.filter(c => {
+    const nameMatch = c.cbfmc && c.cbfmc.toLowerCase().includes(kw);
+    const codeMatch = c.cbfbm && String(c.cbfbm).toLowerCase().includes(kw);
+    const groupMatch = c.group_name && c.group_name.toLowerCase().includes(kw);
+    return nameMatch || codeMatch || groupMatch;
+  });
+});
+
+const pagedInquiryContractors = computed(() => {
+  const start = (inquiryCurrentPage.value - 1) * inquiryPageSize;
+  return filteredInquiryContractors.value.slice(start, start + inquiryPageSize);
+});
+
+const backToContractorList = () => {
+  inquiryContractorName.value = '';
+  inquiryForm.value.cbfbm = '';
+  inquiryPhotoFileList.value = [];
+  try {
+    sessionStorage.removeItem('active_inquiry_cbfbm');
+  } catch (e) {}
+};
+
+const selectInquiryContractor = async (cbf) => {
+  inquiryContractorName.value = `${cbf.cbfmc} (${String(cbf.cbfbm).slice(-4)})`;
+  inquiryForm.value.cbfbm = cbf.cbfbm;
+  inquiryForm.value.cbfmc = cbf.cbfmc;
+  inquiryForm.value.group_name = cbf.group_name || '';
+  const realCbfmc = cbf.cbfmc;
+
+  try {
+    sessionStorage.setItem('active_inquiry_cbfbm', cbf.cbfbm);
+    sessionStorage.setItem('active_inquiry_cbfmc', realCbfmc);
+    if (inquiryVillageCode.value) {
+      sessionStorage.setItem('active_inquiry_vcode', inquiryVillageCode.value);
+    }
+    if (inquiryTownshipName.value) {
+      sessionStorage.setItem('active_inquiry_tname', inquiryTownshipName.value);
+    }
+    if (inquiryVillageName.value) {
+      sessionStorage.setItem('active_inquiry_vname', inquiryVillageName.value);
+    }
+  } catch (e) {}
+
+  showLoadingToast({ message: '加载问询数据...', forbidClick: true });
+  try {
+    const res = await axios.get('/api/waiye/inquiry?cbfbm=' + cbf.cbfbm);
+    if (res.data.code === 200) {
+      const fd = res.data.data.form_data || {};
+      inquiryScanUrl.value = res.data.data.scan_file_url || '';
+      const loadedPhotos = fd.photos || [];
+      inquiryPhotoFileList.value = loadedPhotos.map((url, idx) => ({
+        url: url,
+        isImage: true,
+        name: `现场照片_${idx + 1}`
+      }));
+      inquiryForm.value = {
+        cbfbm: cbf.cbfbm,
+        cbfmc: realCbfmc,
+        group_name: cbf.group_name || fd.group_name || '',
+        bxwr: fd.bxwr || fd.cbfmc || realCbfmc,
+        gender: fd.gender || '男',
+        lxdh: fd.lxdh || cbf.lxdh || '',
+        inquiry_place: fd.inquiry_place || '',
+        relationship: fd.relationship || '',
+        other_rel_desc: fd.other_rel_desc || '',
+        inquirer: fd.inquirer || '',
+        bxwrqm: fd.bxwrqm || '',
+        xwrqm: fd.xwrqm || '',
+        photos: loadedPhotos,
+        questions: JSON.parse(JSON.stringify(INQUIRY_QUESTIONS)).map(q => {
+          const savedQ = (fd.questions || []).find(sq => sq.id === q.id);
+          if (savedQ) {
+            return { ...q, checked: savedQ.checked || false, answer: savedQ.answer || '', desc: savedQ.desc || '' };
+          }
+          return { ...q, checked: false, answer: '', desc: '' };
+        })
+      };
+    }
+  } catch(e) {
+    showToast('加载失败');
+  } finally {
+    closeToast();
+  }
+};
+
+// 现场照片拍照/上传处理（支持客户端毫秒预压缩、并行并发上传、细粒度状态管理与防死链机制）
+const onUploadInquiryPhoto = async (file) => {
+  if (!inquiryForm.value.cbfbm) {
+    showToast('请先选定问询承包方');
+    return;
+  }
+  const filesToUpload = Array.isArray(file) ? file : [file];
+  if (filesToUpload.length === 0) return;
+
+  filesToUpload.forEach(f => {
+    f.status = 'uploading';
+    f.message = '压缩上传中...';
   });
 
-  const pagedInquiryContractors = computed(() => {
-    const start = (inquiryCurrentPage.value - 1) * inquiryPageSize;
-    return filteredInquiryContractors.value.slice(start, start + inquiryPageSize);
-  });
+  let successCount = 0;
+  let failCount = 0;
 
-  const openInquiryContractorModal = async () => {
-    if (!currentGroupCode.value) {
-      showToast('请先选择核查组别');
-      return;
-    }
-    if (groupAllContractors.value.length === 0) {
-      await loadGroupAllContractors(currentGroupCode.value);
-    }
-    inquirySearchKeyword.value = '';
-    inquiryCurrentPage.value = 1;
-    showInquiryPicker.value = true;
-  };
-
-  const selectInquiryContractor = async (cbf) => {
-    showInquiryPicker.value = false;
-    inquiryContractorName.value = `${cbf.cbfmc} (${String(cbf.cbfbm).slice(-4)})`;
-    inquiryForm.value.cbfbm = cbf.cbfbm;
-    const realCbfmc = cbf.cbfmc;
-
-    showLoadingToast({ message: '加载问询数据...', forbidClick: true });
+  // 并行处理并上传农户问询照片
+  await Promise.all(filesToUpload.map(async (item) => {
     try {
-      const res = await axios.get('/api/waiye/inquiry?cbfbm=' + cbf.cbfbm);
-      if (res.data.code === 200) {
-        const fd = res.data.data.form_data || {};
-        inquiryScanUrl.value = res.data.data.scan_file_url || '';
-        inquiryForm.value = {
-          cbfbm: cbf.cbfbm,
-          cbfmc: realCbfmc,
-          bxwr: fd.bxwr || fd.cbfmc || realCbfmc,
-          gender: fd.gender || '男',
-          lxdh: fd.lxdh || cbf.lxdh || '',
-          inquiry_place: fd.inquiry_place || '',
-          relationship: fd.relationship || '',
-          other_rel_desc: fd.other_rel_desc || '',
-          inquirer: fd.inquirer || '',
-          bxwrqm: fd.bxwrqm || '',
-          xwrqm: fd.xwrqm || '',
-          cmdbqm: fd.cmdbqm || '',
-          questions: JSON.parse(JSON.stringify(INQUIRY_QUESTIONS)).map(q => {
-            const savedQ = (fd.questions || []).find(sq => sq.id === q.id);
-            if (savedQ) {
-              return { ...q, checked: savedQ.checked || false, answer: savedQ.answer || '', desc: savedQ.desc || '' };
-            }
-            return { ...q, checked: false, answer: '', desc: '' };
-          })
-        };
-      }
-    } catch(e) {
-      showToast('加载失败');
-    } finally {
-      closeToast();
-    }
-  };
+      const fileObj = item.file || item;
+      const compressedFile = await compressImageClient(fileObj);
+      const formData = new FormData();
+      formData.append('file', compressedFile);
 
-  const saveInquiry = async () => {
-    showLoadingToast({ message: '保存中...', forbidClick: true });
-    try {
-      const realCbfmc = inquiryForm.value.cbfmc || groupAllContractors.value.find(c => c.cbfbm === inquiryForm.value.cbfbm)?.cbfmc || inquiryContractorName.value.split(' ')[0];
-      const payload = {
-        cbfbm: inquiryForm.value.cbfbm,
-        township_name: currentTownshipName.value,
-        village_name: currentVillageName.value,
-        group_name: currentGroupName.value,
-        cbfmc: realCbfmc,
-        form_data: {
-          ...inquiryForm.value,
-          cbfmc: realCbfmc,
-          bxwr: inquiryForm.value.bxwr || realCbfmc
-        }
-      };
-      const res = await axios.post('/api/waiye/inquiry', payload);
-      if (res.data.code === 200) {
-        showToast({ type: 'success', message: '保存成功' });
+      const res = await axios.post('/api/upload_evidence', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 60000
+      });
+      if (res.data.code === 200 && res.data.url) {
+        item.url = res.data.url;
+        item.status = 'done';
+        item.message = '';
+        item.isImage = true;
+        successCount++;
       } else {
-        showToast(res.data.message || '保存失败');
+        item.status = 'failed';
+        item.message = '失败';
+        failCount++;
       }
-    } catch(e) {
-      closeToast();
-      showToast('网络异常');
+    } catch (err) {
+      console.error('上传现场照片失败:', err);
+      item.status = 'failed';
+      item.message = '失败';
+      failCount++;
     }
-  };
+  }));
 
-  const exportInquiry = async () => {
-    showLoadingToast({ message: '生成中...', forbidClick: true });
+  // 严格过滤出合法的已上传服务器URL
+  const validPhotoUrls = inquiryPhotoFileList.value
+    .map(f => f.url || (f.response && f.response.url))
+    .filter(u => typeof u === 'string' && u.startsWith('/uploads/'));
+
+  inquiryForm.value.photos = validPhotoUrls;
+
+  // 强等待保存入库，确保物理落库成功
+  await saveInquiryDirect();
+
+  if (failCount === 0) {
+    showToast({ type: 'success', message: `成功上传 ${successCount} 张照片` });
+  } else {
+    showToast(`上传完成: ${successCount} 张成功, ${failCount} 张失败`);
+  }
+};
+
+// 删除现场照片
+const onDeleteInquiryPhoto = async (file, detail) => {
+  const removedUrl = file.url || (file.response && file.response.url) || '';
+
+  // 1. 同步过滤 inquiryForm.value.photos，只保留以 /uploads/ 开头且不等于 removedUrl 的真实有效路径
+  const currentPhotoUrls = inquiryPhotoFileList.value
+    .map(f => f.url || (f.response && f.response.url))
+    .filter(u => typeof u === 'string' && u.startsWith('/uploads/') && u !== removedUrl);
+
+  inquiryForm.value.photos = currentPhotoUrls;
+
+  // 2. 物理清理服务器文件
+  if (removedUrl && typeof removedUrl === 'string' && removedUrl.startsWith('/uploads/')) {
     try {
-      // Save silently first
-      const realCbfmc = inquiryForm.value.cbfmc || groupAllContractors.value.find(c => c.cbfbm === inquiryForm.value.cbfbm)?.cbfmc || inquiryContractorName.value.split(' ')[0];
-      const payload = {
-        cbfbm: inquiryForm.value.cbfbm,
-        township_name: currentTownshipName.value,
-        village_name: currentVillageName.value,
-        group_name: currentGroupName.value,
+      await axios.post('/api/delete_evidence', { url: removedUrl });
+    } catch (e) {}
+  }
+
+  // 3. 强保存持久化到数据库
+  await saveInquiryDirect();
+  showToast('照片已删除');
+};
+
+const saveInquiryDirect = async () => {
+  try {
+    const realCbfmc = inquiryForm.value.cbfmc || inquiryContractorName.value.split(' ')[0] || '被询问人';
+    const cleanPhotos = (inquiryForm.value.photos || [])
+      .filter(u => typeof u === 'string' && u.startsWith('/uploads/'));
+
+    const payload = {
+      cbfbm: inquiryForm.value.cbfbm,
+      township_name: inquiryTownshipName.value || currentTownshipName.value || '',
+      village_name: inquiryVillageName.value || currentVillageName.value || '',
+      group_name: inquiryForm.value.group_name || currentGroupName.value || '',
+      cbfmc: realCbfmc,
+      form_data: {
+        ...inquiryForm.value,
+        photos: cleanPhotos,
         cbfmc: realCbfmc,
-        form_data: {
-          ...inquiryForm.value,
-          cbfmc: realCbfmc,
-          bxwr: inquiryForm.value.bxwr || realCbfmc
-        }
-      };
-      await axios.post('/api/waiye/inquiry', payload);
-      const res = await axios.post('/api/export_waiye_inquiry', { cbfbm: inquiryForm.value.cbfbm });
-      if (res.data.code === 200) {
-        downloadFile(res.data.url);
-        showToast({ type: 'success', message: '生成成功' });
-      } else {
-        showToast(res.data.message || '生成失败');
+        bxwr: inquiryForm.value.bxwr || realCbfmc
       }
-    } catch(e) {
-      closeToast();
-      showToast('网络异常');
+    };
+    await axios.post('/api/waiye/inquiry', payload);
+  } catch (e) {
+    console.error('保存问询照片异常:', e);
+  }
+};
+
+const saveInquiry = async () => {
+  showLoadingToast({ message: '保存中...', forbidClick: true });
+  try {
+    const realCbfmc = inquiryForm.value.cbfmc || inquiryContractorName.value.split(' ')[0];
+    const cleanPhotos = (inquiryForm.value.photos || [])
+      .filter(u => typeof u === 'string' && u.startsWith('/uploads/'));
+
+    const payload = {
+      cbfbm: inquiryForm.value.cbfbm,
+      township_name: inquiryTownshipName.value || currentTownshipName.value,
+      village_name: inquiryVillageName.value || currentVillageName.value,
+      group_name: inquiryForm.value.group_name || currentGroupName.value,
+      cbfmc: realCbfmc,
+      form_data: {
+        ...inquiryForm.value,
+        photos: cleanPhotos,
+        cbfmc: realCbfmc,
+        bxwr: inquiryForm.value.bxwr || realCbfmc
+      }
+    };
+    const res = await axios.post('/api/waiye/inquiry', payload);
+    if (res.data.code === 200) {
+      showToast({ type: 'success', message: '问询记录保存成功' });
+    } else {
+      showToast(res.data.message || '保存失败');
     }
-  };
+  } catch(e) {
+    closeToast();
+    showToast('网络异常');
+  }
+};
+
+const exportInquiry = async () => {
+  showLoadingToast({ message: '正在生成Word问询笔录...', forbidClick: true });
+  try {
+    const realCbfmc = inquiryForm.value.cbfmc || inquiryContractorName.value.split(' ')[0];
+    const currentPhotos = (inquiryForm.value.photos || [])
+      .filter(u => typeof u === 'string' && u.startsWith('/uploads/'));
+
+    const payload = {
+      cbfbm: inquiryForm.value.cbfbm,
+      township_name: inquiryTownshipName.value || currentTownshipName.value,
+      village_name: inquiryVillageName.value || currentVillageName.value,
+      group_name: inquiryForm.value.group_name || currentGroupName.value,
+      cbfmc: realCbfmc,
+      form_data: {
+        ...inquiryForm.value,
+        photos: currentPhotos,
+        cbfmc: realCbfmc,
+        bxwr: inquiryForm.value.bxwr || realCbfmc
+      }
+    };
+    // 1. 显式等待保存落库，确保数据无缝同步
+    await axios.post('/api/waiye/inquiry', payload);
+
+    // 2. 发起导出请求，同时显式携带 photos 列表作为最高权威保障
+    const res = await axios.post('/api/export_waiye_inquiry', {
+      cbfbm: inquiryForm.value.cbfbm,
+      form_data: payload.form_data,
+      photos: currentPhotos
+    });
+    if (res.data.code === 200) {
+      downloadFile(res.data.url);
+      showToast({ type: 'success', message: '问询笔录生成成功，开始下载！' });
+    } else {
+      showToast(res.data.message || '生成失败');
+    }
+  } catch(e) {
+    closeToast();
+    showToast('网络异常');
+  }
+};
 
 const uploadInquiryScan = async (file) => {
   showLoadingToast({ message: '上传中...', forbidClick: true });
   try {
     const formData = new FormData();
     formData.append('cbfbm', inquiryForm.value.cbfbm);
-    const cbfmc = inquiryForm.value.cbfmc || groupAllContractors.value.find(c => c.cbfbm === inquiryForm.value.cbfbm)?.cbfmc || '';
+    const cbfmc = inquiryForm.value.cbfmc || inquiryContractorName.value.split(' ')[0];
     formData.append('cbfmc', cbfmc);
     let actualFile = Array.isArray(file) ? file[0] : file; actualFile = actualFile.file || actualFile; formData.append('file', actualFile);
     const res = await axios.post('/api/waiye/inquiry_scan', formData, {
@@ -1637,6 +2210,51 @@ const handlePhoneClick = (phone) => {
   }
 };
 
+// 电话编辑相关响应式状态
+const phoneInputMap = ref({});
+const editingPhoneMap = ref({});
+const savingPhoneMap = ref({});
+
+const startEditPhone = (grp) => {
+  editingPhoneMap.value[grp.cbfbm] = true;
+  phoneInputMap.value[grp.cbfbm] = grp.lxdh || '';
+};
+
+const cancelEditPhone = (grp) => {
+  editingPhoneMap.value[grp.cbfbm] = false;
+  phoneInputMap.value[grp.cbfbm] = grp.lxdh || '';
+};
+
+const saveContractorPhone = async (grp) => {
+  const newPhone = (phoneInputMap.value[grp.cbfbm] || '').trim();
+  savingPhoneMap.value[grp.cbfbm] = true;
+  try {
+    const res = await axios.post('/api/waiye/update_phone', {
+      cbfbm: grp.cbfbm,
+      lxdh: newPhone
+    });
+    if (res.data.code === 200) {
+      // 1. 更新当前承包方对象的展示
+      grp.lxdh = newPhone;
+      // 2. 同步更新当前组内属于该承包方的所有地块样本对象
+      for (const p of groupSamples.value) {
+        if (p.cbfbm === grp.cbfbm) {
+          p.lxdh = newPhone;
+        }
+      }
+      editingPhoneMap.value[grp.cbfbm] = false;
+      showToast({ type: 'success', message: newPhone ? '电话已更新！' : '电话已清空' });
+    } else {
+      showToast(res.data.message || '更新电话失败');
+    }
+  } catch (err) {
+    console.error('更新电话出错:', err);
+    showToast('网络请求失败，请稍后重试');
+  } finally {
+    savingPhoneMap.value[grp.cbfbm] = false;
+  }
+};
+
 onMounted(async () => {
   await fetchWaiyeHierarchy();
   await fetchTownshipsSummary();
@@ -1645,6 +2263,36 @@ onMounted(async () => {
   if (autoSaveConfig.value.enabled) {
     const ms = autoSaveConfig.value.interval * 60 * 1000;
     autoSaveTimer = setInterval(silentAutoSave, ms);
+  }
+
+  // 恢复现场问询会话记忆（防止页面刷新后丢失所选农户与照片）
+  try {
+    const savedCbfbm = sessionStorage.getItem('active_inquiry_cbfbm');
+    const savedCbfmc = sessionStorage.getItem('active_inquiry_cbfmc') || '被询问人';
+    const savedVcode = sessionStorage.getItem('active_inquiry_vcode');
+    const savedTname = sessionStorage.getItem('active_inquiry_tname') || '';
+    const savedVname = sessionStorage.getItem('active_inquiry_vname') || '';
+
+    if (savedVcode) {
+      inquiryVillageCode.value = savedVcode;
+      inquiryTownshipName.value = savedTname;
+      inquiryVillageName.value = savedVname;
+      if (savedTname && savedVname) {
+        inquiryVillageText.value = `${savedTname} / ${savedVname}`;
+      }
+      inquiryVillageCascaderValue.value = savedVcode;
+      // 异步加载该村承包方列表
+      loadVillageAllContractors(savedVcode);
+      // 加载该村现场会照片 (保证刷新后秒级自动回显！)
+      loadVillagePhotos(savedVcode);
+    }
+
+    if (savedCbfbm) {
+      // 直接触发加载该农户的问询记录（含照片），无论全村列表是否加载完毕均能毫秒级回显！
+      await selectInquiryContractor({ cbfbm: savedCbfbm, cbfmc: savedCbfmc });
+    }
+  } catch (e) {
+    console.warn('恢复现场问询会话失败:', e);
   }
 });
 
@@ -1739,12 +2387,13 @@ const selectGroup = async (tName, vName, gName, gCode) => {
   selectedGroupText.value = `${tName} / ${vName} / ${gName}`;
   cascaderValue.value = gCode;
   
-  // 清空上一个组的现场问询选人状态
-  inquiryContractorName.value = '';
-  inquiryForm.value.cbfbm = '';
+  // 自动将现场问询的村级环境同步更新为当前村
+  const vCode = (gCode && gCode.length >= 12) ? (gCode.slice(0, 12) + '00') : '';
+  if (vCode && inquiryVillageCode.value !== vCode) {
+    setInquiryVillage(tName, vName, vCode);
+  }
   
   await loadGroupSamples(gCode, tName, vName, gName);
-  await loadGroupAllContractors(gCode);
 };
 
 const loadGroupSamples = async (gCode, tName, vName, gName) => {
@@ -1910,7 +2559,7 @@ const exportCurrentGroupAtt8 = async () => {
       village_name: currentVillageName.value,
       group_name: currentGroupName.value,
       group_code: currentGroupCode.value
-    });
+    }, { timeout: 180000 });
 
     if (res.data.code === 200 && res.data.url) {
       showToast({ type: 'success', message: '附件8已生成，正在下载...' });
@@ -1919,7 +2568,7 @@ const exportCurrentGroupAtt8 = async () => {
       showToast(res.data.message || '生成失败');
     }
   } catch(e) {
-    showToast('生成请求失败');
+    showToast(e.message && e.message.includes('timeout') ? '生成超时，数据量较大请重试' : '生成请求失败，请检查网络');
   } finally {
     exportingGroupAtt8.value = false;
   }
@@ -2125,7 +2774,7 @@ const onExportTownshipAllAtt8 = async () => {
   try {
     const res = await axios.post('/api/export_waiye_att8', {
       township_name: exportTownshipName.value
-    });
+    }, { timeout: 300000 });
     if (res.data.code === 200 && res.data.urls) {
       showToast({ type: 'success', message: `已生成 ${res.data.count} 份附件8，正在下载...` });
       for (const u of res.data.urls) {
@@ -2149,7 +2798,7 @@ const onExportSingleGroupAtt8 = async (grp) => {
       village_name: grp.village_name,
       group_name: grp.group_name,
       group_code: grp.group_code
-    });
+    }, { timeout: 180000 });
     if (res.data.code === 200 && res.data.url) {
       showToast({ type: 'success', message: '附件8已生成，正在下载...' });
       triggerDownload(res.data.url);

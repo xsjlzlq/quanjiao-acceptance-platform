@@ -5,7 +5,7 @@
         <div class="logo-icon-box">
           <van-icon name="shield-o" size="36" color="#fff" />
         </div>
-        <h2 class="login-title">全椒县二轮延包验收管理平台</h2>
+        <h2 class="login-title">二轮延包验收管理平台</h2>
         <p class="login-sub">县级自查内业与外业核查系统</p>
       </div>
 
@@ -30,13 +30,25 @@
           clearable
         />
 
-        <!-- Cloudflare Turnstile 人机验证小组件 -->
-        <div class="turnstile-container">
-          <div id="turnstile-widget" ref="turnstileContainer"></div>
-          <div v-if="!turnstileReady" class="turnstile-loading">
-            <van-loading size="16px">人机安全验证加载中...</van-loading>
-          </div>
-        </div>
+        <!-- 纯本地图形验证码组件，0 外部网络依赖 -->
+        <van-field
+          v-model="captchaCode"
+          name="captchaCode"
+          label="验证码"
+          placeholder="请输入4位验证码"
+          maxlength="4"
+          autocomplete="off"
+          :rules="[{ required: true, message: '请输入验证码' }]"
+          left-icon="shield-o"
+          clearable
+        >
+          <template #button>
+            <div class="captcha-img-box" @click="fetchCaptcha" title="看不清？点击更换验证码">
+              <img v-if="captchaImg" :src="captchaImg" alt="验证码" class="captcha-img" />
+              <span v-else class="captcha-loading-text">加载中...</span>
+            </div>
+          </template>
+        </van-field>
 
         <div class="login-btn-wrap">
           <van-button
@@ -54,7 +66,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { showToast } from 'vant';
 import axios from 'axios';
@@ -65,114 +77,75 @@ const password = ref('');
 const loading  = ref(false);
 const errMsg   = ref('');
 
-// Turnstile 状态管理
-const turnstileContainer = ref(null);
-const turnstileToken = ref('');
-const turnstileReady = ref(false);
-const TURNSTILE_SITE_KEY = '0x4AAAAAABAhK2FC_aemQDpH';
-let widgetId = null;
-let checkInterval = null;
+// 本地图形验证码管理
+const captchaId = ref('');
+const captchaCode = ref('');
+const captchaImg = ref('');
+const captchaLoading = ref(false);
 
-const initTurnstile = () => {
-  if (window.turnstile) {
-    try {
-      if (widgetId !== null) {
-        window.turnstile.remove(widgetId);
-      }
-      widgetId = window.turnstile.render('#turnstile-widget', {
-        sitekey: TURNSTILE_SITE_KEY,
-        theme: 'light',
-        callback: (token) => {
-          turnstileToken.value = token;
-          turnstileReady.value = true;
-          errMsg.value = '';
-        },
-        'expired-callback': () => {
-          turnstileToken.value = '';
-          errMsg.value = '安全验证已过期，请重新验证';
-        },
-        'error-callback': () => {
-          turnstileToken.value = '';
-          errMsg.value = '安全验证加载失败，请检查网络连接';
-        }
-      });
-      turnstileReady.value = true;
-      if (checkInterval) {
-        clearInterval(checkInterval);
-        checkInterval = null;
-      }
-    } catch (e) {
-      console.error('Turnstile render error:', e);
+const fetchCaptcha = async () => {
+  captchaLoading.value = true;
+  try {
+    const res = await axios.get('/api/auth/captcha');
+    if (res.data && res.data.code === 200) {
+      captchaId.value = res.data.captcha_id;
+      captchaImg.value = res.data.image;
+      captchaCode.value = '';
+    } else {
+      errMsg.value = res.data?.message || '获取验证码失败';
     }
+  } catch (e) {
+    errMsg.value = '验证码加载失败，请检查网络';
+  } finally {
+    captchaLoading.value = false;
   }
 };
 
 onMounted(() => {
-  if (window.turnstile) {
-    initTurnstile();
-  } else {
-    // 轮询检测脚本是否加载完成
-    let attempts = 0;
-    checkInterval = setInterval(() => {
-      attempts++;
-      if (window.turnstile) {
-        initTurnstile();
-      } else if (attempts > 30) {
-        clearInterval(checkInterval);
-        checkInterval = null;
-        errMsg.value = '安全验证组件加载超时，请刷新重试';
-      }
-    }, 500);
-  }
-});
-
-onUnmounted(() => {
-  if (checkInterval) {
-    clearInterval(checkInterval);
-    checkInterval = null;
-  }
-  if (window.turnstile && widgetId !== null) {
-    try {
-      window.turnstile.remove(widgetId);
-    } catch (e) {}
-  }
+  // 进入登录页时彻底清理残留历史会话缓存，防止上个账号或管理员的旧库信息污染新登录账号
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('auth_username');
+  localStorage.removeItem('auth_role');
+  localStorage.removeItem('auth_perms');
+  localStorage.removeItem('auth_target_db');
+  localStorage.removeItem('auth_county_name');
+  fetchCaptcha();
 });
 
 const onLogin = async () => {
+  if (loading.value) return; // 正在提交中强行拦截并发与连击请求，防止产生双发请求竞态
   errMsg.value = '';
-  if (!turnstileToken.value) {
-    showToast('请先完成人机安全验证');
-    errMsg.value = '请勾选/完成人机安全验证';
+  if (!captchaCode.value.trim()) {
+    showToast('请输入图形验证码');
+    errMsg.value = '请输入图形验证码';
     return;
   }
 
   loading.value = true;
   try {
     const res = await axios.post('/api/auth/login', {
-      username: username.value,
+      username: username.value.trim(),
       password: password.value,
-      turnstile_token: turnstileToken.value
+      captcha_id: captchaId.value,
+      captcha_code: captchaCode.value.trim()
     });
     if (res.data.code === 200) {
-      localStorage.setItem('auth_token',    res.data.token);
-      localStorage.setItem('auth_username', res.data.username);
-      localStorage.setItem('auth_role',     res.data.role);
-      localStorage.setItem('auth_perms',    JSON.stringify(res.data.perms));
+      errMsg.value = '';
+      localStorage.setItem('auth_token',      res.data.token);
+      localStorage.setItem('auth_username',   res.data.username);
+      localStorage.setItem('auth_role',       res.data.role);
+      localStorage.setItem('auth_perms',      JSON.stringify(res.data.perms));
+      localStorage.setItem('auth_target_db',  res.data.target_db || '');
+      localStorage.setItem('auth_county_name',res.data.county_name || '');
       router.push('/');
     } else {
       errMsg.value = res.data.message || '登录失败';
-      // 登录失败后重置验证码
-      if (window.turnstile && widgetId !== null) {
-        window.turnstile.reset(widgetId);
-        turnstileToken.value = '';
-      }
+      // 登录失败自动刷新验证码
+      await fetchCaptcha();
     }
   } catch (e) {
     errMsg.value = '网络异常，请稍后重试';
-    if (window.turnstile && widgetId !== null) {
-      window.turnstile.reset(widgetId);
-      turnstileToken.value = '';
-    }
+    await fetchCaptcha();
   } finally {
     loading.value = false;
   }
@@ -257,19 +230,30 @@ const onLogin = async () => {
   padding: 18px 8px 24px;
 }
 
-.turnstile-container {
-  margin: 16px 16px 0;
-  display: flex;
-  flex-direction: column;
+.captcha-img-box {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 65px;
+  width: 108px;
+  height: 36px;
+  cursor: pointer;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #ebedf0;
+  background: #f7f8fa;
+  user-select: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
-.turnstile-loading {
+.captcha-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.captcha-loading-text {
   font-size: 12px;
-  color: #999;
-  padding: 12px 0;
+  color: #969799;
 }
 
 .login-btn-wrap {

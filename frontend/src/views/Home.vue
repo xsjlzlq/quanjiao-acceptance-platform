@@ -1,6 +1,6 @@
 <template>
   <div class="home">
-    <van-nav-bar title="工作台 - 县级验收管理平台">
+    <van-nav-bar :title="pageTitle">
       <template #right>
         <span class="user-badge" @click="goToSettings">
           <van-icon name="user-o" style="margin-right: 4px;" />
@@ -58,12 +58,50 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
+import axios from 'axios';
 import { hasPerm } from '../utils/auth';
 
 const router = useRouter();
 const currentUsername = computed(() => localStorage.getItem('auth_username') || '用户');
+const countyName = ref(localStorage.getItem('auth_county_name') || '');
+
+const pageTitle = computed(() => {
+  const cName = countyName.value.trim();
+  if (cName) {
+    return `工作台 - ${cName}县级验收管理平台`;
+  }
+  return '工作台 - 县级验收管理平台';
+});
+
+// 从后端同步获取当前连接的数据库与县域名称
+const refreshCountyInfo = async () => {
+  try {
+    const res = await axios.get('/api/system/db_config');
+    if (res.data && res.data.code === 200 && res.data.data) {
+      const fetchedCounty = (res.data.data.county_name || res.data.data.current_db || '').trim();
+      if (fetchedCounty) {
+        countyName.value = fetchedCounty;
+        localStorage.setItem('auth_county_name', fetchedCounty);
+      }
+      if (res.data.data.current_db) {
+        localStorage.setItem('auth_target_db', res.data.data.current_db);
+      }
+    }
+  } catch (e) {
+    console.error('获取当前县域名称失败:', e);
+  }
+};
+
+onMounted(() => {
+  refreshCountyInfo();
+  window.addEventListener('db-switched', refreshCountyInfo);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('db-switched', refreshCountyInfo);
+});
 
 // 判断模块下是否有任一子权限
 const hasModulePerm = (mod) => {
@@ -71,7 +109,7 @@ const hasModulePerm = (mod) => {
   if (role === 'admin') return true;
 
   const MOD_PERMS = {
-    settings: ['settings_security', 'settings_import'],
+    settings: ['settings_security', 'settings_import', 'help_manual', 'help_audit_log'],
     tasks:    ['tasks_sample', 'tasks_clear', 'tasks_export_att4', 'tasks_export_att5'],
     waiye:    ['waiye_check', 'waiye_save', 'waiye_export_att8', 'waiye_export_att9', 'waiye_inquiry'],
     neiye:    ['neiye_view', 'neiye_save', 'neiye_export_att6', 'neiye_export_att7'],

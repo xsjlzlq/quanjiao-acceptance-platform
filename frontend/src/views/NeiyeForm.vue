@@ -9,7 +9,7 @@
         is-link
         readonly
         label="核查对象"
-        placeholder="请选择县级或乡镇"
+        placeholder="请选择县级或抽样村"
         @click="showPicker = true"
       />
       <van-popup v-model:show="showPicker" round position="bottom">
@@ -31,7 +31,7 @@
             <van-icon name="passed" color="#07c160" /> 实时保存 <span v-if="lastAutoSaveTime">(上次同步: {{ lastAutoSaveTime }})</span>
           </div>
         </div>
-        <div class="score-val">{{ totalScore }} <span class="score-max">/ {{ selectedAreaLevel === 'county' ? 15 : 70 }}分</span></div>
+        <div class="score-val">{{ totalScore }} <span class="score-max">/ {{ (selectedAreaLevel === 'county' || selectedAreaLevel === 'township') ? 15 : 70 }}分</span></div>
       </div>
       <div class="btn-group">
         
@@ -40,10 +40,10 @@
           <van-button size="small" type="primary" round :loading="exportingVoucher" @click="onExportVoucher">
             导出凭证记录
           </van-button>
-<!-- Township Exports -->
-        <template v-if="selectedAreaLevel === 'township'">
+<!-- Village/Township Exports -->
+        <template v-if="selectedAreaLevel !== 'county'">
           <van-button v-if="hasPerm('neiye_export_att6')" size="small" type="success" round :loading="exporting6" @click="onExportAtt6">
-            导出附件6 检查记录表
+            {{ selectedAreaLevel === 'township' ? '导出附件6 检查记录表（1/4）' : '导出附件6 检查记录表' }}
           </van-button>
         </template>
 
@@ -321,8 +321,8 @@
         </van-cell-group>
       </van-tab>
 
-      <!-- Township Tabs: Only visible if NOT county -->
-      <template v-if="selectedAreaLevel !== 'county'">
+      <!-- Village Tabs: Only visible if village (Township only checks 机制运行 15分 like County) -->
+      <template v-if="selectedAreaLevel === 'village'">
         <!-- Tab 2: 程序规范 (30分) -->
         <van-tab title="程序规范(30分)">
           <van-cell-group inset title="1. 成立机构 (5分)" style="margin-top: 10px;">
@@ -1425,6 +1425,8 @@ const showPicker = ref(false);
 const selectedAreaName = ref('');
 const selectedAreaCode = ref('');
 const selectedAreaLevel = ref('');
+const selectedTownshipName = ref('');
+const selectedVillageName = ref('');
 
 const saving = ref(false);
 const exporting6 = ref(false);
@@ -1489,20 +1491,40 @@ onMounted(async () => {
   try {
     const res = await axios.get('/api/neiye/townships');
     if (res.data.code === 200) {
-      const townships = res.data.townships || [];
       const county = res.data.county;
+      const villages = res.data.villages || [];
+      const townships = res.data.townships || [];
       
       pickerColumns.value = [];
       if (county) {
         pickerColumns.value.push({ text: `${county.name} (县级)`, value: county.code, level: 'county' });
       }
-      pickerColumns.value.push(
-        ...townships.map(t => ({
-          text: t.name,
-          value: t.code,
-          level: 'township'
-        }))
-      );
+      
+      // 1. 增加乡镇级选项：供录入各乡镇本级的“机制运行(15分)”
+      if (townships.length > 0) {
+        pickerColumns.value.push(
+          ...townships.map(t => ({
+            text: `${t.name} (乡镇级 - 机制运行)`,
+            value: t.code,
+            level: 'township',
+            townshipName: t.name,
+            villageName: ''
+          }))
+        );
+      }
+
+      // 2. 行政村级选项：供录入各抽样行政村的内业检查 (70分)
+      if (villages.length > 0) {
+        pickerColumns.value.push(
+          ...villages.map(v => ({
+            text: v.full_title || `${v.township_name} - ${v.name}`,
+            value: v.code,
+            level: 'village',
+            townshipName: v.township_name,
+            villageName: v.name
+          }))
+        );
+      }
     }
   } catch(e) {
     showToast('获取区域层级失败');
@@ -1533,8 +1555,10 @@ const onPickerConfirm = ({ selectedOptions }) => {
   selectedAreaName.value = opt.text;
   selectedAreaCode.value = opt.value;
   selectedAreaLevel.value = opt.level;
+  selectedTownshipName.value = opt.townshipName || '';
+  selectedVillageName.value = opt.villageName || '';
   
-  if (selectedAreaLevel.value === 'county') {
+  if (selectedAreaLevel.value === 'county' || selectedAreaLevel.value === 'township') {
     activeTab.value = 0;
   }
   
@@ -1637,7 +1661,7 @@ const totalScore = computed(() => {
   let deduct_mech = Math.min(d_m1 + d_m2 + d_m3 + d_m4, 15.0);
   let score_mech = Math.max(15.0 - deduct_mech, 0.0);
 
-  if (selectedAreaLevel.value === 'county') {
+  if (selectedAreaLevel.value === 'county' || selectedAreaLevel.value === 'township') {
     return Number(score_mech.toFixed(1));
   }
 
@@ -1974,6 +1998,8 @@ const onExportAtt6 = async () => {
       qsdwdm: selectedAreaCode.value,
       qsdwmc: selectedAreaName.value,
       level: selectedAreaLevel.value,
+      township_name: selectedTownshipName.value,
+      village_name: selectedVillageName.value,
       form_data: form.value
     });
     

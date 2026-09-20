@@ -63,45 +63,30 @@ def export_att10(township_scores, county_mech):
             
             t.Cell(r_idx, 1).Range.Text = str(idx + 1)
             t.Cell(r_idx, 2).Range.Text = t_name
-            if sc:
-                t.Cell(r_idx, 3).Range.Text = format_score(sc["mech"])
-                t.Cell(r_idx, 4).Range.Text = format_score(sc["prog_nei"])
-                t.Cell(r_idx, 5).Range.Text = format_score(sc["prog_wai"])
-                t.Cell(r_idx, 6).Range.Text = format_score(sc["policy"])
-                t.Cell(r_idx, 7).Range.Text = format_score(sc["effect_nei"])
-                t.Cell(r_idx, 8).Range.Text = format_score(sc["effect_wai"])
-                t.Cell(r_idx, 9).Range.Text = format_score(sc["total"])
+            if sc and (sc.get("has_neiye") or sc.get("has_waiye")):
+                t.Cell(r_idx, 3).Range.Text = format_score(sc["mech"]) if sc.get("has_neiye") else ""
+                t.Cell(r_idx, 4).Range.Text = format_score(sc["prog_nei"]) if sc.get("has_neiye") else ""
+                t.Cell(r_idx, 5).Range.Text = format_score(sc["prog_wai"]) if sc.get("has_waiye") else ""
+                t.Cell(r_idx, 6).Range.Text = format_score(sc["policy"]) if sc.get("has_neiye") else ""
+                t.Cell(r_idx, 7).Range.Text = format_score(sc["effect_nei"]) if sc.get("has_neiye") else ""
+                t.Cell(r_idx, 8).Range.Text = format_score(sc["effect_wai"]) if sc.get("has_waiye") else ""
+                t.Cell(r_idx, 9).Range.Text = format_score(sc["total"]) if sc.get("total") is not None else ""
             else:
                 for c in range(3, 10):
                     t.Cell(r_idx, c).Range.Text = ""
                     
         # Summary Row (County)
         county_row = t.Rows.Count
-        count_evaluated = len([sc for sc in township_scores.values() if sc])
-        if count_evaluated > 0:
-            avg_mech = round((sum(sc["mech"] for sc in township_scores.values() if sc) + county_mech) / (count_evaluated + 1), 1)
-            avg_prog_nei = sum(sc["prog_nei"] for sc in township_scores.values() if sc) / count_evaluated
-            avg_prog_wai = sum(sc["prog_wai"] for sc in township_scores.values() if sc) / count_evaluated
-            avg_policy = round(sum(sc["policy"] for sc in township_scores.values() if sc) / count_evaluated, 1)
-            avg_effect_nei = sum(sc["effect_nei"] for sc in township_scores.values() if sc) / count_evaluated
-            avg_effect_wai = sum(sc["effect_wai"] for sc in township_scores.values() if sc) / count_evaluated
-            avg_prog = round(avg_prog_nei + avg_prog_wai, 1)
-            avg_effect = round(avg_effect_nei + avg_effect_wai, 1)
-            avg_total = round(avg_mech + avg_prog + avg_policy + avg_effect, 1)
-        else:
-            avg_mech = county_mech
-            avg_prog = 50.0
-            avg_policy = 15.0
-            avg_effect = 20.0
-            avg_total = avg_mech + avg_prog + avg_policy + avg_effect
+        from score_service import calculate_county_averages
+        c_avg = calculate_county_averages(township_scores, county_mech, True)
 
         t.Cell(county_row, 1).Range.Text = str(N + 1)
         t.Cell(county_row, 2).Range.Text = county_name
-        t.Cell(county_row, 3).Range.Text = format_score(avg_mech)
-        t.Cell(county_row, 4).Range.Text = format_score(avg_prog)
-        t.Cell(county_row, 5).Range.Text = format_score(avg_policy)
-        t.Cell(county_row, 6).Range.Text = format_score(avg_effect)
-        t.Cell(county_row, 7).Range.Text = format_score(avg_total)
+        t.Cell(county_row, 3).Range.Text = format_score(c_avg["mech"])
+        t.Cell(county_row, 4).Range.Text = format_score(c_avg["prog_total"])
+        t.Cell(county_row, 5).Range.Text = format_score(c_avg["policy"])
+        t.Cell(county_row, 6).Range.Text = format_score(c_avg["effect_total"])
+        t.Cell(county_row, 7).Range.Text = format_score(round(c_avg["mech"] + c_avg["prog_total"] + c_avg["policy"] + c_avg["effect_total"], 1))
             
         doc.SaveAs2(FileName=out_path, FileFormat=0)
         doc.Close(0)

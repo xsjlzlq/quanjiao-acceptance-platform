@@ -464,7 +464,7 @@ def fill_table_4(t4, form_data, scores):
     if form_data.get("effect_1"): issues.extend(form_data.get("effect_1", []))
     _set_issues_cell(t4.Rows(4).Cells(2), issues) 
 
-def export_neiye_att6_township(township_name, form_data):
+def export_neiye_att6_township(qsdwmc, form_data, township_name=None, village_name=None):
     pythoncom.CoInitialize()
     try:
         from database import get_county_and_townships_sync
@@ -478,7 +478,8 @@ def export_neiye_att6_township(township_name, form_data):
         base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件6.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_filename = f"附件6_{county_name}县级自查内业组检查记录表_{township_name}.doc"
+        clean_target = sanitize_filename(qsdwmc)
+        out_filename = f"附件6_{county_name}县级自查内业组检查记录表_{clean_target}.doc"
         out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         shutil.copy(tpl, out_path)
         
@@ -488,12 +489,45 @@ def export_neiye_att6_township(township_name, form_data):
         replace_common_bookmarks(doc, county_name)
         replace_att6_bookmarks(doc, county_name)
 
-        # Fill 行政区划名称 bookmarks in all 4 pages (xzqh_1 ~ xzqh_4)
-        if township_name.startswith(county_name):
-            _xzqh_text = township_name
+        # 映射 xzqh_1 ~ xzqh_4 书签：
+        # - 若为乡镇级（无村名或村名为镇名），映射为 XX县XX镇
+        # - 若为村级，映射为 XX县XX镇XX村
+        t_part = township_name or ""
+        v_part = village_name or ""
+        if not t_part and not v_part:
+            # 尝试从 qsdwmc 解析 (例如 "明光街道 - 蔬菜村" 或 "襄河镇")
+            if " - " in qsdwmc:
+                parts = qsdwmc.split(" - ", 1)
+                t_part, v_part = parts[0].strip(), parts[1].strip()
+            else:
+                t_part = qsdwmc.strip()
+                v_part = ""
+
+        # 如果村名与镇名相同或村名为空，判定为乡镇级
+        if v_part == t_part:
+            v_part = ""
+
+        # 规整县、镇、村文本，防止出现重复前缀（如 明光市明光街道蔬菜村）
+        if t_part:
+            if t_part.startswith(county_name):
+                base_tv = t_part
+            else:
+                base_tv = f"{county_name}{t_part}"
         else:
-            _xzqh_text = county_name + township_name
-        _fill_bookmarks(doc, ["xzqh_1", "xzqh_2", "xzqh_3", "xzqh_4"], _xzqh_text)
+            base_tv = county_name
+
+        if v_part:
+            if v_part.startswith(base_tv):
+                _xzqh_text = v_part
+            elif t_part and v_part.startswith(t_part):
+                _xzqh_text = f"{county_name}{v_part}" if not v_part.startswith(county_name) else v_part
+            else:
+                _xzqh_text = f"{base_tv}{v_part}"
+        else:
+            # 严格满足要求：乡镇级映射为 XX县XX镇
+            _xzqh_text = base_tv
+
+        _fill_bookmarks(doc, ["xzqh_1", "xzqh_2", "xzqh_3", "xzqh_4", "xzqh1", "xzqh2", "xzqh3", "xzqh4"], _xzqh_text)
         jcz_sign = form_data.get("jcz_sign")
         fhz_sign = form_data.get("fhz_sign")
         _fill_bookmarks(doc, ["jcz1", "jcz2", "jcz3", "jcz4"], form_data.get("jcz_name") or "")
@@ -519,6 +553,17 @@ def export_neiye_att6_township(township_name, form_data):
         pythoncom.CoUninitialize()
 
 def export_neiye_att6_county(form_data):
+    """县级自查：仅导出机制运行 1/4"""
+    return export_neiye_att6_mechanism_only(form_data, is_county=True)
+
+def export_neiye_att6_mechanism_only(form_data, is_county=False, township_name=None):
+    """
+    导出仅包含【机制运行 (1/4)】的附件6检查记录表：
+    - is_county=True 时：适用于县级自查，xzqh_1 书签映射为 XX县，输出 附件6_{county_name}县级自查内业组检查记录表（1_4）.doc
+    - is_county=False 时：适用于乡镇级自查，xzqh_1 书签映射为 XX县XX镇，输出 附件6_{county_name}县级自查内业组检查记录表_{township_name}（1_4）.doc
+    - 自动填充 Table 1 机制运行扣分项与凭证
+    - 物理删除 Table 4, 3, 2，仅保留第 1/4 页完整格式并保存
+    """
     pythoncom.CoInitialize()
     try:
         from database import get_county_and_townships_sync
@@ -532,7 +577,19 @@ def export_neiye_att6_county(form_data):
         base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件6.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_filename = f"附件6_{county_name}县级自查内业组检查记录表（1_4）.doc"
+        
+        if is_county or not township_name:
+            out_filename = f"附件6_{county_name}县级自查内业组检查记录表（1_4）.doc"
+            xzqh_text = county_name
+        else:
+            clean_ts = sanitize_filename(township_name)
+            out_filename = f"附件6_{county_name}县级自查内业组检查记录表_{clean_ts}（1_4）.doc"
+            # 严格映射为 XX县XX镇
+            if clean_ts.startswith(county_name):
+                xzqh_text = clean_ts
+            else:
+                xzqh_text = f"{county_name}{clean_ts}"
+
         out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         shutil.copy(tpl, out_path)
         
@@ -542,12 +599,12 @@ def export_neiye_att6_county(form_data):
         replace_common_bookmarks(doc, county_name)
         replace_att6_bookmarks(doc, county_name)
 
-        # Fill 行政区划名称 bookmark for page 1 only (county export)
-        _fill_bookmarks(doc, ["xzqh_1"], county_name)
+        # Fill 行政区划名称 bookmark for page 1 (机制运行 1/4)
+        _fill_bookmarks(doc, ["xzqh_1", "xzqh1"], xzqh_text)
         jcz_sign = form_data.get("jcz_sign")
         fhz_sign = form_data.get("fhz_sign")
-        _fill_bookmarks(doc, ["jcz1", "jcz2", "jcz3", "jcz4"], form_data.get("jcz_name") or "")
-        _fill_bookmarks(doc, ["fhz1", "fhz2", "fhz3", "fhz4"], form_data.get("fhz_name") or "")
+        _fill_bookmarks(doc, ["jcz1"], form_data.get("jcz_name") or "")
+        _fill_bookmarks(doc, ["fhz1"], form_data.get("fhz_name") or "")
         
         scores = calculate_neiye_subscores(form_data)
         fill_table_1(doc.Tables(1), form_data, scores)
@@ -571,14 +628,14 @@ def export_neiye_att6_county(form_data):
         word.Quit()
         return f"/api/download?file=downloads/{out_filename}"
     except Exception as e:
-        print("export_neiye_att6_county error:", e)
+        print("export_neiye_att6_mechanism_only error:", e)
         try: word.Quit()
         except: pass
         raise e
     finally:
         pythoncom.CoUninitialize()
 
-def export_neiye_att7(records_by_qsdwdm):
+def export_neiye_att7(records_by_qsdwdm, township_villages_map=None):
     pythoncom.CoInitialize()
     try:
         from database import get_county_and_townships_sync
@@ -620,7 +677,6 @@ def export_neiye_att7(records_by_qsdwdm):
         township_list = [(t["code"], t["name"]) for t in township_list_raw]
         N = len(township_list)
         # 表格初始结构：Row 1 表头，Row 2 县级行，最后一行是总评行
-        # 当前预留的乡镇行数 = t.Rows.Count - 3
         current_reserved_ts_rows = t.Rows.Count - 3
         if N > current_reserved_ts_rows:
             for _ in range(N - current_reserved_ts_rows):
@@ -632,22 +688,74 @@ def export_neiye_att7(records_by_qsdwdm):
         sums = {"mech": 0.0, "prog": 0.0, "policy": 0.0, "effect": 0.0, "total": 0.0}
         count_evaluated = 0
         
+        # 如果未传入乡镇与抽样村对应关系，尝试构建映射
+        ts_v_map = township_villages_map or {}
+        
         for idx, (code, name) in enumerate(township_list):
             r_idx = idx + 3
             t.Rows(r_idx).Cells(1).Range.Text = str(idx + 2)
             t.Rows(r_idx).Cells(2).Range.Text = name
             
-            rec = records_by_qsdwdm.get(code)
-            if rec:
+            # 获取该乡镇本级的机制运行得分 (qsdwdm == code 或 level == 'township')
+            township_rec = records_by_qsdwdm.get(code)
+            township_self_mech = None
+            if township_rec:
+                ts_scores = calculate_neiye_subscores(township_rec.get("form_data", {}))["score"]
+                township_self_mech = ts_scores["mech"]
+
+            # 获取该乡镇下所有抽样村在 neiye_records 中的记录
+            v_codes = ts_v_map.get(name, [])
+            village_recs = []
+            if v_codes:
+                for vc in v_codes:
+                    if vc in records_by_qsdwdm:
+                        village_recs.append(records_by_qsdwdm[vc])
+            else:
+                # 兼容：前缀以该镇代码开头且长度>9位、或等于该镇代码的记录
+                for r_code, r_data in records_by_qsdwdm.items():
+                    if r_code != county_code and (r_code == code or (r_code.startswith(code) and len(r_code) > 9)):
+                        village_recs.append(r_data)
+            
+            if village_recs or township_self_mech is not None:
                 count_evaluated += 1
-                sc = calculate_neiye_subscores(rec.get("form_data", {}))["score"]
-                t.Rows(r_idx).Cells(3).Range.Text = f"{sc['mech']:.1f}".rstrip('0').rstrip('.')
-                t.Rows(r_idx).Cells(4).Range.Text = f"{sc['prog']:.1f}".rstrip('0').rstrip('.')
-                t.Rows(r_idx).Cells(5).Range.Text = f"{sc['policy']:.1f}".rstrip('0').rstrip('.')
-                t.Rows(r_idx).Cells(6).Range.Text = f"{sc['effect']:.1f}".rstrip('0').rstrip('.')
-                t.Rows(r_idx).Cells(7).Range.Text = f"{sc['total']:.1f}".rstrip('0').rstrip('.')
+                v_scores = [calculate_neiye_subscores(vr.get("form_data", {}))["score"] for vr in village_recs]
+                k = len(v_scores)
                 
-                for k in sums: sums[k] += sc[k]
+                # 计算下属抽样村各项指标平均分
+                if k > 0:
+                    village_avg_mech = sum(s["mech"] for s in v_scores) / k
+                    sc_prog = sum(s["prog"] for s in v_scores) / k
+                    sc_policy = sum(s["policy"] for s in v_scores) / k
+                    sc_effect = sum(s["effect"] for s in v_scores) / k
+                else:
+                    village_avg_mech = None
+                    sc_prog = 0.0
+                    sc_policy = 0.0
+                    sc_effect = 0.0
+
+                # 机制运行得分计算方式：该乡镇机制运行得分与乡镇下属村的机制运行平均分
+                if township_self_mech is not None and village_avg_mech is not None:
+                    sc_mech = (township_self_mech + village_avg_mech) / 2.0
+                elif township_self_mech is not None:
+                    sc_mech = township_self_mech
+                elif village_avg_mech is not None:
+                    sc_mech = village_avg_mech
+                else:
+                    sc_mech = 15.0
+
+                sc_total = sc_mech + sc_prog + sc_policy + sc_effect
+
+                t.Rows(r_idx).Cells(3).Range.Text = f"{sc_mech:.1f}".rstrip('0').rstrip('.')
+                t.Rows(r_idx).Cells(4).Range.Text = f"{sc_prog:.1f}".rstrip('0').rstrip('.') if k > 0 else "/"
+                t.Rows(r_idx).Cells(5).Range.Text = f"{sc_policy:.1f}".rstrip('0').rstrip('.') if k > 0 else "/"
+                t.Rows(r_idx).Cells(6).Range.Text = f"{sc_effect:.1f}".rstrip('0').rstrip('.') if k > 0 else "/"
+                t.Rows(r_idx).Cells(7).Range.Text = f"{sc_total:.1f}".rstrip('0').rstrip('.')
+                
+                sums["mech"] += sc_mech
+                sums["prog"] += sc_prog
+                sums["policy"] += sc_policy
+                sums["effect"] += sc_effect
+                sums["total"] += sc_total
             else:
                 t.Rows(r_idx).Cells(3).Range.Text = ""
                 t.Rows(r_idx).Cells(4).Range.Text = ""
@@ -678,8 +786,6 @@ def export_neiye_att7(records_by_qsdwdm):
             t.Rows(summary_row).Cells(5).Range.Text = ""
             t.Rows(summary_row).Cells(6).Range.Text = ""
             t.Rows(summary_row).Cells(7).Range.Text = ""
-
-
 
         doc.Save()
         doc.Close(False)
@@ -766,12 +872,13 @@ def export_att5(stats_data, township_code, township_name):
         replace_common_bookmarks(doc5, county_name)
         t5 = doc5.Tables(1)
         
+        N = len(stats_data)
         while t5.Rows.Count > 2:
             t5.Rows(3).Delete()
             
-        for _ in range(max(0, len(stats_data) - 1)):
+        if N > 1:
             t5.Rows(2).Select()
-            word.Selection.InsertRowsBelow(1)
+            word.Selection.InsertRowsBelow(N - 1)
             
         for i, row in enumerate(stats_data):
             r_idx = i + 2
@@ -810,6 +917,7 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
         word = win32com.client.DispatchEx('Word.Application')
         word.Visible = False
         word.DisplayAlerts = 0
+        word.ScreenUpdating = False
         
         base_dir = get_base_dir()
         tpl = os.path.join(base_dir, '附件', '附件8.doc')
@@ -842,9 +950,10 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
             try: t8.Rows(3).Delete()
             except: pass
             
-        for _ in range(max(0, len(group_rows) - 1)):
+        N_rows = len(group_rows)
+        if N_rows > 1:
             t8.Rows(2).Select()
-            word.Selection.InsertRowsBelow(1)
+            word.Selection.InsertRowsBelow(N_rows - 1)
             
         total_errors = 0
         satisfaction_count = 0
@@ -857,6 +966,7 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
             r_idx = i + 2
             farmer_name = r.get('cbfmc', '') or r.get('承包方代表', '')
             cbfbm = str(r.get("cbfbm", "") or r.get("cbfbm_short", "") or r.get("cbfmc", ""))
+            is_first_parcel_of_cbf = (cbfbm not in processed_contractors)
             
             # Parcel-level errors
             for k in ['area_acknowledged', 'bound_correct', 'self_verified']:
@@ -870,7 +980,7 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
 
             # Contractor-level errors & satisfaction
             sat = r.get('satisfaction', '满意')
-            if cbfbm not in processed_contractors:
+            if is_first_parcel_of_cbf:
                 processed_contractors.add(cbfbm)
                 contractor_count += 1
                 for k in ['rights_correct', 'member_qualified', 'self_signed']:
@@ -880,22 +990,15 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
                     total_errors += 1
                 if sat == '满意':
                     satisfaction_count += 1
-                
-            t8.Cell(r_idx, 1).Range.Text = str(i + 1)
-            t8.Cell(r_idx, 2).Range.Text = farmer_name
-            t8.Cell(r_idx, 3).Range.Text = str(r.get('cbfbm_short', '') or r.get('承包方编码(缩略码)', ''))
-            
-            cell_dh = t8.Cell(r_idx, 4)
-            if is_phone_err:
-                cell_dh.Range.Text = 'X'
-                cell_dh.Range.Font.Color = 255
-            else:
-                cell_dh.Range.Text = lxdh_val if lxdh_val else '/' 
 
+            # 序号、地块信息每行必填
+            t8.Cell(r_idx, 1).Range.Text = str(i + 1)
             t8.Cell(r_idx, 5).Range.Text = str(r.get('dkmc', '') or r.get('地块名称', ''))
             t8.Cell(r_idx, 6).Range.Text = str(r.get('dkbm_short', '') or r.get('地块简编码', ''))
             t8.Cell(r_idx, 7).Range.Text = str(r.get('scmj', '') or r.get('成果面积(亩)', ''))
-            for c_pos, k_name in [(8, 'area_acknowledged'), (9, 'rights_correct'), (10, 'bound_correct'), (11, 'member_qualified'), (12, 'self_verified'), (13, 'self_signed')]:
+
+            # 地块级核查指标
+            for c_pos, k_name in [(8, 'area_acknowledged'), (10, 'bound_correct'), (12, 'self_verified')]:
                 cell_k = t8.Cell(r_idx, c_pos)
                 val_k = r.get(k_name, '')
                 if val_k == 'X':
@@ -903,9 +1006,31 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
                     cell_k.Range.Font.Color = 255
                 else:
                     cell_k.Range.Text = '√'
-            t8.Cell(r_idx, 14).Range.Text = sat
-            t8.Cell(r_idx, 15).Range.Text = r.get('survey_method', r.get('调查抽样方式', '现场'))
-            t8.Cell(r_idx, 16).Range.Text = ""
+
+            # 农户级指标（仅首行填值并设颜色，后续行保持空值，便于后续单元格纵向合并且不重复文字）
+            if is_first_parcel_of_cbf:
+                t8.Cell(r_idx, 2).Range.Text = farmer_name
+                t8.Cell(r_idx, 3).Range.Text = str(r.get('cbfbm_short', '') or r.get('承包方编码(缩略码)', ''))
+                
+                cell_dh = t8.Cell(r_idx, 4)
+                if is_phone_err:
+                    cell_dh.Range.Text = 'X'
+                    cell_dh.Range.Font.Color = 255
+                else:
+                    cell_dh.Range.Text = lxdh_val if lxdh_val else '/'
+
+                for c_pos, k_name in [(9, 'rights_correct'), (11, 'member_qualified'), (13, 'self_signed')]:
+                    cell_k = t8.Cell(r_idx, c_pos)
+                    val_k = r.get(k_name, '')
+                    if val_k == 'X':
+                        cell_k.Range.Text = 'X'
+                        cell_k.Range.Font.Color = 255
+                    else:
+                        cell_k.Range.Text = '√'
+
+                t8.Cell(r_idx, 14).Range.Text = sat
+                t8.Cell(r_idx, 15).Range.Text = r.get('survey_method', r.get('调查抽样方式', '现场'))
+                t8.Cell(r_idx, 16).Range.Text = ""
 
         # Fill stats rows BEFORE any vertical merges
         total_count = len(group_rows)
@@ -936,21 +1061,30 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
 
         sig_dir = os.path.join(base_dir, "backend", "uploads", "signatures")
         
+        # 保持 100% 完整原版合并逻辑：合并全部 9 个农户级列
         for cbfbm, r_start, r_end in reversed(segments):
             if r_start < r_end:
                 for col_idx in [16, 15, 14, 13, 11, 9, 4, 3, 2]:
-                    if col_idx == 16:
+                    try:
                         t8.Cell(r_start, col_idx).Merge(t8.Cell(r_end, col_idx))
-                    else:
-                        val = t8.Cell(r_start, col_idx).Range.Text.replace('\r', '').replace('\x07', '')
-                        is_red = (t8.Cell(r_start, col_idx).Range.Font.Color == 255) or (val == 'X')
-                        t8.Cell(r_start, col_idx).Merge(t8.Cell(r_end, col_idx))
-                        t8.Cell(r_start, col_idx).Range.Text = val
-                        if is_red:
-                            t8.Cell(r_start, col_idx).Range.Font.Color = 255
+                    except Exception as me:
+                        print(f"Merge err at rows {r_start}-{r_end} col {col_idx}: {me}")
                 cell_target = t8.Cell(r_start, 16)
             else:
                 cell_target = t8.Cell(r_start, 16)
+
+            sig_path = os.path.join(sig_dir, f"{cbfbm}.png")
+            if os.path.exists(sig_path):
+                cell_target.Range.Text = ""
+                pic = cell_target.Range.InlineShapes.AddPicture(
+                    FileName=os.path.abspath(sig_path), LinkToFile=False, SaveWithDocument=True
+                )
+                pic.Width = 65
+                pic.Height = 26
+                cell_target.Range.ParagraphFormat.Alignment = 1
+                cell_target.VerticalAlignment = 1
+            else:
+                cell_target.Range.Text = ""
                 
             sig_path = os.path.join(sig_dir, f"{cbfbm}.png")
             if os.path.exists(sig_path):
@@ -965,11 +1099,10 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
             else:
                 cell_target.Range.Text = ""
 
-        for cell in t8.Range.Cells:
-            try:
-                cell.VerticalAlignment = 1
-            except:
-                pass
+        try:
+            t8.Range.ParagraphFormat.Alignment = 1
+        except:
+            pass
         doc8.SaveAs2(FileName=out_path, FileFormat=0)
         doc8.Close(0)
         doc8 = None
@@ -1507,8 +1640,19 @@ def export_waiye_inquiry(data):
         # 实际承包方名称用于文件名和书签 cbfmc
         real_cbfmc = str(data.get("cbfmc", "")).strip()
         clean_cbf = sanitize_filename(real_cbfmc)
+
+        # 文件名前缀带上 XX镇XX村
+        clean_ts = sanitize_filename(data.get("township_name", "") or "")
+        clean_vn = sanitize_filename(data.get("village_name", "") or "")
+        loc_parts = [p for p in [clean_ts, clean_vn] if p]
+        loc_prefix = "".join(loc_parts)
+        if loc_prefix:
+            out_filename = f"附件_询问笔录_{loc_prefix}_{clean_cbf}.doc"
+        else:
+            out_filename = f"附件_询问笔录_{clean_cbf}.doc"
+
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_path = os.path.join(base_dir, "backend", "downloads", f"附件_询问笔录_{clean_cbf}.doc")
+        out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         if os.path.exists(out_path):
             try: os.remove(out_path)
             except: pass
@@ -1623,10 +1767,9 @@ def export_waiye_inquiry(data):
                 rng.ParagraphFormat.SpaceAfter = 0
                 doc.Bookmarks.Add(Name="wxnr", Range=rng)
         
-        # Signatures
+        # Signatures (取消村民代表签名，仅保留被询问人与询问人签名)
         sig_bxwrqm = os.path.join(base_dir, "backend", "uploads", "signatures", f"{data.get('cbfbm')}_bxwrqm.png")
         sig_xwrqm = os.path.join(base_dir, "backend", "uploads", "signatures", f"{data.get('cbfbm')}_xwrqm.png")
-        sig_cmdbqm = os.path.join(base_dir, "backend", "uploads", "signatures", f"{data.get('cbfbm')}_cmdbqm.png")
 
         def _insert_sig(doc, bm_name, path):
             if os.path.exists(path):
@@ -1640,14 +1783,83 @@ def export_waiye_inquiry(data):
 
         _insert_sig(doc, "bxwrqm", sig_bxwrqm)
         _insert_sig(doc, "xwrqm", sig_xwrqm)
-        _insert_sig(doc, "cmdbqm", sig_cmdbqm)
         
+        # 附带现场照片：在笔录末尾自动分页插入现场问询照片及图题
+        photos = data.get("photos") or fd.get("photos") or []
+        valid_photos = []
+        for p_item in photos:
+            raw_url = p_item if isinstance(p_item, str) else (p_item.get("url") or "")
+            if not raw_url:
+                continue
+            clean_url = raw_url.strip()
+            # 兼容多种 URL 表达形式
+            if clean_url.startswith("/uploads/"):
+                rel_path = clean_url.lstrip("/")
+            elif "file=" in clean_url:
+                rel_path = clean_url.split("file=")[-1].lstrip("/")
+            else:
+                rel_path = os.path.join("uploads", os.path.basename(clean_url))
+
+            # 兼容各种工作目录层级
+            candidates = [
+                os.path.join(base_dir, "backend", rel_path),
+                os.path.join(base_dir, rel_path),
+                os.path.join(os.path.dirname(__file__), rel_path),
+                os.path.abspath(clean_url)
+            ]
+            for cand in candidates:
+                if os.path.exists(cand) and os.path.isfile(cand):
+                    valid_photos.append(cand)
+                    break
+
+        if valid_photos:
+            try:
+                # 在文档末尾插入分页符 (wdPageBreak = 7)
+                rng_end = doc.Content
+                rng_end.Collapse(0)  # wdCollapseEnd = 0
+                rng_end.InsertBreak(7)
+
+                # 插入附图大标题
+                p_title = doc.Paragraphs.Add()
+                p_title.Range.Text = "附：现场问询核查照片\r"
+                p_title.Range.Font.Name = "黑体"
+                p_title.Range.Font.Size = 14
+                p_title.Range.Font.Bold = True
+                p_title.Range.ParagraphFormat.Alignment = 1  # 居中
+                p_title.Range.ParagraphFormat.SpaceBefore = 12
+                p_title.Range.ParagraphFormat.SpaceAfter = 14
+
+                for p_idx, photo_abs_path in enumerate(valid_photos, 1):
+                    # 插入照片
+                    p_img = doc.Paragraphs.Add()
+                    shape = p_img.Range.InlineShapes.AddPicture(
+                        FileName=photo_abs_path,
+                        LinkToFile=False,
+                        SaveWithDocument=True
+                    )
+                    # 适度缩放照片宽度至标准 350 pt (~12.3 cm)，高宽比锁定
+                    shape.Width = 350
+                    shape.Height = shape.Height * (350.0 / max(shape.Width, 1))
+                    p_img.Range.ParagraphFormat.Alignment = 1  # 居中
+                    p_img.Range.ParagraphFormat.SpaceAfter = 6
+
+                    # 插入图题说明
+                    p_cap = doc.Paragraphs.Add()
+                    p_cap.Range.Text = f"现场照片 {p_idx}\r"
+                    p_cap.Range.Font.Name = "宋体"
+                    p_cap.Range.Font.Size = 10.5
+                    p_cap.Range.Font.Bold = False
+                    p_cap.Range.ParagraphFormat.Alignment = 1  # 居中
+                    p_cap.Range.ParagraphFormat.SpaceAfter = 16
+            except Exception as pe:
+                print(f"插入现场问询照片异常 (已忽略): {pe}")
+
         doc.SaveAs2(FileName=out_path, FileFormat=0)
         doc.Close(0)
         doc = None
         word.Quit()
         word = None
-        return f"/api/download?file=downloads/附件_询问笔录_{clean_cbf}.doc"
+        return f"/api/download?file=downloads/{out_filename}"
     except Exception as e:
         print("export_waiye_inquiry error:", e)
         if doc:
@@ -1659,3 +1871,337 @@ def export_waiye_inquiry(data):
         raise e
     finally:
         pythoncom.CoUninitialize()
+
+
+def export_village_meeting_photos(township_name: str, village_name: str, photos: list) -> str:
+    """
+    导出指定行政村的现场会与问询现场照片文档 (.docx)
+    模板文件：附件/现场会照片.docx
+    命名格式：{township_name}{village_name}现场会照片.docx
+    排版规范：
+    - 使用模板中的大标题与基本信息，自动替换为当前乡镇、行政村名称及核查日期
+    - 使用模板中的 2×2 表格，将照片逐张插入表格单元格中
+    - 根据单元格大小与图片原始比例自动计算自适应缩放尺寸，居中显示且不破坏表格布局
+    - 超过 4 张照片时自动新增表格行，无照片时友好提示
+    """
+    import os, shutil, win32com.client, pythoncom, datetime
+    from PIL import Image, ImageOps
+    pythoncom.CoInitialize()
+    word = None
+    doc = None
+    try:
+        from database import get_county_and_townships_sync
+        county_info, _ = get_county_and_townships_sync()
+        county_name = county_info.get("name", "全椒县")
+
+        word = win32com.client.DispatchEx("Word.Application")
+        word.Visible = False
+        word.DisplayAlerts = 0
+
+        base_dir = get_base_dir()
+        downloads_dir = os.path.join(base_dir, "backend", "downloads")
+        os.makedirs(downloads_dir, exist_ok=True)
+
+        clean_ts = sanitize_filename(township_name or "")
+        clean_vn = sanitize_filename(village_name or "")
+        loc_prefix = f"{clean_ts}{clean_vn}" if (clean_ts or clean_vn) else "现场会"
+        out_filename = f"{loc_prefix}现场会照片.docx"
+        out_path = os.path.join(downloads_dir, out_filename)
+        if os.path.exists(out_path):
+            try: os.remove(out_path)
+            except: pass
+
+        tpl_path = os.path.join(base_dir, "附件", "现场会照片.docx")
+        if not os.path.exists(tpl_path):
+            tpl_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "附件", "现场会照片.docx")
+
+        if os.path.exists(tpl_path):
+            shutil.copy(tpl_path, out_path)
+            doc = word.Documents.Open(out_path)
+        else:
+            # 模板不存在时的后备容错：新建文档
+            doc = word.Documents.Add()
+            doc.PageSetup.TopMargin = 72
+            doc.PageSetup.BottomMargin = 72
+            doc.PageSetup.LeftMargin = 72
+            doc.PageSetup.RightMargin = 72
+
+        now_dt = datetime.datetime.now()
+        now_date_str = f"{now_dt.year}年{now_dt.month:02d}月{now_dt.day:02d}日"
+        target_loc = f"{clean_ts}{clean_vn}" if (clean_ts or clean_vn) else "现场会"
+
+        # 1. 替换标题与元数据中的行政区划与日期
+        rng = doc.Content
+        # 替换镇村名称
+        rng.Find.Execute("襄河镇八波村", False, False, False, False, False, True, 1, False, target_loc, 2)
+        # 替换县名（若非全椒县）
+        if county_name and county_name != "全椒县":
+            rng.Find.Execute("全椒县", False, False, False, False, False, True, 1, False, county_name, 2)
+        # 替换拍摄时间
+        rng.Find.Execute("拍摄时间：[0-9]{4}年[0-9]{2}月[0-9]{2}日", False, False, True, False, False, True, 1, False, f"拍摄时间：{now_date_str}", 2)
+
+        # 2. 筛选有效照片路径
+        valid_photos = []
+        for p_item in (photos or []):
+            raw_url = p_item if isinstance(p_item, str) else (p_item.get("url") or "")
+            if not raw_url:
+                continue
+            clean_url = raw_url.strip()
+            if clean_url.startswith("/uploads/"):
+                rel_path = clean_url.lstrip("/")
+            elif "file=" in clean_url:
+                rel_path = clean_url.split("file=")[-1].lstrip("/")
+            else:
+                rel_path = os.path.join("uploads", os.path.basename(clean_url))
+
+            candidates = [
+                os.path.join(base_dir, "backend", rel_path),
+                os.path.join(base_dir, rel_path),
+                os.path.join(os.path.dirname(__file__), rel_path),
+                os.path.abspath(clean_url)
+            ]
+            for cand in candidates:
+                if os.path.exists(cand) and os.path.isfile(cand):
+                    valid_photos.append(cand)
+                    break
+
+        # 3. 将照片填充至表格单元格中
+        if doc.Tables.Count > 0:
+            table = doc.Tables(1)
+            table.AllowAutoFit = False  # 禁止表格自动拉伸以保持网格整齐
+
+            if not valid_photos:
+                cell = table.Cell(1, 1)
+                p = cell.Range.Paragraphs(1)
+                p.Range.Text = "（注：当前行政村尚未上传现场会核查照片）"
+                p.Range.Font.Name = "宋体"
+                p.Range.Font.Size = 11
+                p.Range.Font.Color = 8421504  # 灰色
+                p.Range.ParagraphFormat.Alignment = 1
+                cell.VerticalAlignment = 1
+            else:
+                # 动态扩展行数：每行容纳 2 张照片
+                needed_rows = (len(valid_photos) + 1) // 2
+                while table.Rows.Count < needed_rows:
+                    new_row = table.Rows.Add()
+                    new_row.Height = table.Rows(1).Height
+                    new_row.HeightRule = 1  # wdRowHeightAtLeast
+
+                for p_idx, photo_abs in enumerate(valid_photos):
+                    r = (p_idx // 2) + 1
+                    c = (p_idx % 2) + 1
+                    cell = table.Cell(r, c)
+
+                    # 清除可能多余的段落，保留单个居中段落
+                    p = cell.Range.Paragraphs(1)
+                    p.Range.Text = ""
+                    p.Range.ParagraphFormat.SpaceBefore = 0
+                    p.Range.ParagraphFormat.SpaceAfter = 0
+                    p.Range.ParagraphFormat.Alignment = 1  # 水平居中
+                    cell.VerticalAlignment = 1  # 垂直居中
+
+                    try:
+                        with Image.open(photo_abs) as im:
+                            im = ImageOps.exif_transpose(im)
+                            img_w, img_h = im.size
+
+                        # 单元格可用最大宽高（扣除边距与安全余量，避免溢出引发分页）
+                        avail_w = max(cell.Width - cell.LeftPadding - cell.RightPadding - 4.0, 10.0)
+                        avail_h = max(table.Rows(r).Height - cell.TopPadding - cell.BottomPadding - 8.0, 10.0)
+
+                        scale = min(avail_w / max(img_w, 1), avail_h / max(img_h, 1))
+                        target_w = img_w * scale
+                        target_h = img_h * scale
+
+                        shape = cell.Range.InlineShapes.AddPicture(
+                            FileName=photo_abs,
+                            LinkToFile=False,
+                            SaveWithDocument=True
+                        )
+                        shape.LockAspectRatio = -1  # msoTrue
+                        shape.Width = target_w
+                        shape.Height = target_h
+                    except Exception as pe:
+                        print(f"插入现场照片 {p_idx + 1} 异常: {pe}")
+                        cell.Range.Text = "【照片加载失败】"
+
+            # 压缩表格后末尾段落高度，确保 1~4 张照片时严格保持为单页 A4
+            if doc.Paragraphs.Count > 0:
+                last_p = doc.Paragraphs(doc.Paragraphs.Count)
+                last_p.Range.Font.Size = 1
+                last_p.Range.ParagraphFormat.SpaceBefore = 0
+                last_p.Range.ParagraphFormat.SpaceAfter = 0
+                last_p.Range.ParagraphFormat.LineSpacingRule = 4  # wdLineSpaceExactly
+                last_p.Range.ParagraphFormat.LineSpacing = 1
+        else:
+            # 容错：如果文档无表格则简单追加
+            for p_idx, photo_abs in enumerate(valid_photos, 1):
+                p_img = doc.Paragraphs.Add()
+                shape = p_img.Range.InlineShapes.AddPicture(
+                    FileName=photo_abs,
+                    LinkToFile=False,
+                    SaveWithDocument=True
+                )
+                shape.Width = 360
+                shape.Height = shape.Height * (360.0 / max(shape.Width, 1))
+
+        doc.SaveAs2(FileName=out_path, FileFormat=12)
+        doc.Close(0)
+        doc = None
+        word.Quit()
+        word = None
+        return f"/api/download?file=downloads/{out_filename}"
+    except Exception as e:
+        print("export_village_meeting_photos error:", e)
+        if doc:
+            try: doc.Close(0)
+            except: pass
+        if word:
+            try: word.Quit()
+            except: pass
+        raise e
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def export_sample_detail_excel(township_name: str, contractor_rows: list) -> str:
+    """
+    导出各乡镇自查抽样农户明细表 Excel 文件 (.xlsx)
+    包含字段：序号、乡镇名、村名、组名、承包方编码、承包方名称、承包方证件号码。
+    严格遵循 Excel 规范：居中对齐、文本自动换行、单元格全边框、数字与身份证文本格式防变形。
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    base_dir = get_base_dir()
+    clean_ts = sanitize_filename(township_name)
+    downloads_dir = os.path.join(base_dir, "backend", "downloads")
+    os.makedirs(downloads_dir, exist_ok=True)
+    out_path = os.path.join(downloads_dir, f"自查抽样明细表_{clean_ts}.xlsx")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "抽样农户明细"
+    ws.views.sheetView[0].showGridLines = True
+
+    # 样式定义
+    font_title = Font(name="微软雅黑", size=15, bold=True, color="1F497D")
+    font_header = Font(name="微软雅黑", size=11, bold=True, color="FFFFFF")
+    font_data = Font(name="微软雅黑", size=10)
+    font_total = Font(name="微软雅黑", size=10, bold=True, color="000000")
+
+    fill_header = PatternFill(start_color="2E75B6", end_color="2E75B6", fill_type="solid")
+    fill_zebra = PatternFill(start_color="F2F5F9", end_color="F2F5F9", fill_type="solid")
+    fill_total = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+
+    align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    thin_border_side = Side(border_style="thin", color="BFBFBF")
+    double_border_side = Side(border_style="double", color="000000")
+    border_all = Border(left=thin_border_side, right=thin_border_side, top=thin_border_side, bottom=thin_border_side)
+    border_total = Border(left=thin_border_side, right=thin_border_side, top=thin_border_side, bottom=double_border_side)
+
+    # 1. 标题行
+    ws.merge_cells("A1:G1")
+    ws["A1"] = f"【{township_name}】二轮延包自查抽样农户明细表"
+    ws["A1"].font = font_title
+    ws["A1"].alignment = align_center
+    ws.row_dimensions[1].height = 38
+
+    # 2. 表头行
+    headers = ["序号", "乡镇名", "村名", "组名", "承包方编码", "承包方名称", "承包方证件号码"]
+    ws.append(headers)
+    ws.row_dimensions[2].height = 26
+
+    for col_idx in range(1, len(headers) + 1):
+        c = ws.cell(row=2, column=col_idx)
+        c.font = font_header
+        c.fill = fill_header
+        c.alignment = align_center
+        c.border = border_all
+
+    # 3. 填充数据行
+    start_row = 3
+    villages_set = set()
+    groups_set = set()
+
+    for i, r in enumerate(contractor_rows, 1):
+        curr_row = start_row + i - 1
+        ws.row_dimensions[curr_row].height = 22
+
+        t_name = str(r.get("township_name") or township_name or "").strip()
+        v_name = str(r.get("village_name") or "").strip()
+        g_name = str(r.get("group_name") or "").strip()
+        cbfbm = str(r.get("cbfbm") or "").strip()
+        cbfmc = str(r.get("cbfmc") or "").strip()
+        cbfzjhm = str(r.get("cbfzjhm") or "").strip()
+
+        if v_name:
+            villages_set.add(v_name)
+        if g_name:
+            groups_set.add((v_name, g_name))
+
+        ws.append([i, t_name, v_name, g_name, cbfbm, cbfmc, cbfzjhm])
+
+        is_zebra = (i % 2 == 0)
+        row_fill = fill_zebra if is_zebra else None
+
+        for c_idx in range(1, 8):
+            cell = ws.cell(row=curr_row, column=c_idx)
+            cell.font = font_data
+            cell.alignment = align_center
+            cell.border = border_all
+            if row_fill:
+                cell.fill = row_fill
+
+        # 确保编码与身份证号码为严格文本格式防变形
+        ws.cell(row=curr_row, column=5).number_format = "@"
+        ws.cell(row=curr_row, column=7).number_format = "@"
+
+    # 4. 统计汇总行
+    total_row = start_row + len(contractor_rows)
+    ws.row_dimensions[total_row].height = 26
+    total_data = [
+        "合计",
+        township_name,
+        f"共 {len(villages_set)} 个行政村",
+        f"共 {len(groups_set)} 个组",
+        f"总抽样: {len(contractor_rows)} 户",
+        "-",
+        "-"
+    ]
+    ws.append(total_data)
+
+    for c_idx in range(1, 8):
+        cell = ws.cell(row=total_row, column=c_idx)
+        cell.font = font_total
+        cell.fill = fill_total
+        cell.alignment = align_center
+        cell.border = border_total
+
+    # 5. 列宽自适应
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            if cell.row == 1:
+                continue
+            val_str = str(cell.value or "")
+            str_len = sum(2 if ord(char) > 127 else 1 for char in val_str)
+            if str_len > max_len:
+                max_len = str_len
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    # 专门优化各列宽度
+    ws.column_dimensions["A"].width = 8   # 序号
+    ws.column_dimensions["B"].width = 14  # 乡镇名
+    ws.column_dimensions["C"].width = 16  # 村名
+    ws.column_dimensions["D"].width = 16  # 组名
+    ws.column_dimensions["E"].width = 24  # 承包方编码 (18位)
+    ws.column_dimensions["F"].width = 15  # 承包方名称
+    ws.column_dimensions["G"].width = 24  # 承包方证件号码 (18位)
+
+    wb.save(out_path)
+    return f"/api/download?file=downloads/自查抽样明细表_{clean_ts}.xlsx"
+

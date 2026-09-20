@@ -191,6 +191,24 @@ def ensure_database_and_tables(db_name: str, cfg: dict):
     cur.close()
     target_conn.close()
 
+def ensure_business_indexes(engine):
+    """确保核心业务大表建有必要的高性能索引"""
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cbf_cbfbm ON cbf (cbfbm)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cbf_cbfbm_ops ON cbf (cbfbm text_pattern_ops)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cbdkxx_cbfbm ON cbdkxx (cbfbm)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cbdkxx_cbfbm_ops ON cbdkxx (cbfbm text_pattern_ops)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cbdkxx_dkbm ON cbdkxx (dkbm)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dkxx_shp_dkbm ON dkxx_shp_attrs (dkbm)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_qsdwdmb_qsdwdm ON qsdwdmb (qsdwdm)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_qsdwdmb_qsdwdm_text ON qsdwdmb ((qsdwdm::text) text_pattern_ops)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_waiye_group_code ON waiye_samples (group_code)"))
+            conn.commit()
+            print("业务核心索引创建/校验成功！")
+        except Exception as e:
+            print(f"创建业务索引异常: {e}")
+
 def query_import_summary(engine):
     """查询导入后的统计信息：乡镇数、村数、组数、农户数、地块数"""
     summary = {
@@ -397,8 +415,14 @@ def import_data_from_path(source_dir: str, county_name: str = None):
         else:
             update_progress(92, "跳过代码表", "未检测到 XLS 代码表，跳过", action="跳过代码表导入")
 
-        # 4. 汇总统计
-        update_progress(95, "正在汇总统计入库成果...", "开始统计乡镇、村组及农户、地块数量...", action="正在执行全量数据库成果多维统计")
+        # 4. 建立高性能索引并汇总统计
+        update_progress(94, "正在建立业务索引...", "正在为地块与承包方大表建立高性能查询索引...", action="优化数据库索引")
+        try:
+            ensure_business_indexes(engine)
+        except Exception as ie:
+            print(f"建立索引警告: {ie}")
+
+        update_progress(96, "正在汇总统计入库成果...", "开始统计乡镇、村组及农户、地块数量...", action="正在执行全量数据库成果多维统计")
         summary = query_import_summary(engine)
         
         # 5. 切换系统当前主数据库连接并持久化到 config.json

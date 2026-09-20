@@ -3,29 +3,42 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 import uuid
 import shutil, io
+from collections import defaultdict
 from PIL import Image, ImageOps
 from doc_exporter import (
     export_docs, export_att4, export_att5, export_waiye_att8, export_waiye_att9,
     export_neiye_att6_township, export_neiye_att6_county, export_neiye_att7,
-    export_rectify_att12, export_rectify_att13, sanitize_filename
+    export_neiye_att6_mechanism_only,
+    export_rectify_att12, export_rectify_att13, sanitize_filename,
+    export_sample_detail_excel, export_village_meeting_photos
 )
 # -*- coding: utf-8 -*-
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 import asyncio
 import os
+import time
+import datetime
 import random
 import math
 import json
 import pandas as pd
 from sqlalchemy import text, create_engine
-from database import SessionLocal, load_config, switch_database, list_available_databases, build_sync_url, parse_qsdwdmb_hierarchy, get_base_dir
+from database import (
+    SessionLocal, load_config, switch_database, list_available_databases,
+    build_sync_url, parse_qsdwdmb_hierarchy, get_base_dir, current_db_ctx,
+    get_county_and_townships_sync
+)
 from data_importer import import_data_from_path, get_import_progress, query_import_summary, ensure_database_and_tables, validate_source_package
 import auth as auth_module
+from audit_logger import record_check_audit
 
-from batch_exporter import run_batch_export
+from batch_exporter import (
+    run_batch_export, export_tasks, get_export_task_progress,
+    set_export_task_init, update_export_task
+)
 
 app = FastAPI(title="全椒县二轮延包验收系统 API")
 
@@ -69,24 +82,53 @@ class BatchExportRequest(BaseModel):
     township_code: str = ""
     township_name: str = ""
     attachments: List[str] = []
-    
+
 @app.post("/api/batch_export")
 async def api_batch_export(req: BatchExportRequest):
-    try:
-        url = await run_batch_export(
-            req.level, req.township_code, req.township_name, req.attachments
-        )
-        if url:
-            return {"code": 200, "url": url}
-        else:
-            return {"code": 500, "message": "批量打包失败"}
-    except Exception as e:
-        print("Batch export error:", e)
-        return {"code": 500, "message": f"服务器异常: {str(e)}"}
+    """
+    异步启动批量打包任务，防止大附件生成导致前端 HTTP 524/Timeout 超时。
+    立即返回 task_id，前端轮询 /api/batch_export/progress。
+    """
+    import uuid
+    task_id = uuid.uuid4().hex
+    set_export_task_init(task_id)
+
+    async def _async_worker():
+        try:
+            await run_batch_export(
+                req.level, req.township_code, req.township_name, req.attachments, task_id=task_id
+            )
+        except Exception as err:
+            update_export_task(task_id, 100, f"打包失败: {str(err)}", error=str(err))
+
+    # 后台异步执行
+    asyncio.create_task(_async_worker())
+    return {"code": 200, "message": "批量打包任务已在后台启动", "task_id": task_id}
+
+@app.get("/api/batch_export/progress")
+async def api_batch_export_progress(task_id: str):
+    """
+    轮询批量打包任务的实时百分比与当前处理步骤
+    """
+    prog = get_export_task_progress(task_id)
+    return {"code": 200, "data": prog}
 
 @app.on_event("startup")
 async def startup_event():
     await auth_module.init_auth_db()
+    
+    # 自动遍历现有可用数据库，统一自愈补齐用户表字段，彻底根治 500 报错
+    try:
+        all_dbs = await asyncio.to_thread(list_available_databases)
+        for db in all_dbs:
+            try:
+                async with SessionLocal(db_name=db) as s_db:
+                    await auth_module.ensure_user_table_schema(s_db)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"Startup multi-db migration error: {e}")
+
     try:
         async with SessionLocal() as s:
             await s.execute(text("""
@@ -113,9 +155,65 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def dynamic_db_router_middleware(request: Request, call_next):
+    """
+    多租户动态数据库路由器中间件（安全加固版）：
+    1. 若请求携带有效普通用户 Token，强制锁定其绑定的 target_db，杜绝客户端请求头覆盖或篡改；
+    2. 若用户为管理员 (role == 'admin')，允许根据客户端 X-Database 或全局设置灵活动态切库；
+    3. 公共/未登录请求默认采用请求头 X-Database 或 config.json 中的数据库。
+    将解析出的数据库绑定至当前请求的协程 ContextVar 中，实现多账号不同库完全隔离！
+    """
+    raw_target_db = request.headers.get("X-Database", "").strip()
+    client_db = ""
+    if raw_target_db:
+        import urllib.parse
+        client_db = urllib.parse.unquote(raw_target_db).strip()
+
+    target_db = ""
+    # 1. 尝试从合法 Token 中解析身份
+    auth_hdr = request.headers.get("Authorization", "")
+    if auth_hdr.startswith("Bearer "):
+        raw_token = auth_hdr.split(" ", 1)[1].strip()
+        payload = auth_module._verify_token(raw_token)
+        if payload:
+            role = payload.get("role", "user")
+            bound_db = (payload.get("target_db") or "").strip()
+            # 普通用户：最高权威，强制使用 Token 内部绑定的数据库，绝不允许被客户端 Header 污染！
+            if role != "admin" and bound_db:
+                target_db = bound_db
+            # 管理员用户：若传了 client_db 则优先使用，以支持管理员在前端自由切换库
+            elif role == "admin" and client_db:
+                target_db = client_db
+            elif bound_db:
+                target_db = bound_db
+
+    # 2. 未能从 Token 判定的情况（如未登录或管理员未指定库），采用客户端指定库或系统默认库
+    if not target_db and client_db:
+        target_db = client_db
+
+    if not target_db:
+        cfg = load_config()
+        target_db = cfg.get("db_name", "quanjiao")
+
+    token_ctx = current_db_ctx.set(target_db)
+    try:
+        response = await call_next(request)
+        import urllib.parse
+        response.headers["X-Active-Database"] = urllib.parse.quote(str(target_db))
+        return response
+    finally:
+        current_db_ctx.reset(token_ctx)
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to 全椒县二轮延包验收系统 API"}
+
+@app.get("/api/system/available_dbs")
+async def api_get_available_dbs():
+    dbs = await asyncio.to_thread(list_available_databases)
+    cfg = load_config()
+    return {"code": 200, "databases": dbs, "default_db": cfg.get("db_name", "quanjiao")}
 
 class ImportRequest(BaseModel):
     source_path: str
@@ -129,7 +227,11 @@ class SwitchDbRequest(BaseModel):
 async def api_get_db_config():
     cfg = load_config()
     current_db = cfg.get("db_name", "quanjiao")
-    county_name = cfg.get("county_name", "全椒县")
+    
+    # 动态从数据库代码表中解析权威中文县名
+    county_info, _ = await asyncio.to_thread(get_county_and_townships_sync, None, current_db)
+    county_name = county_info.get("name") if county_info and county_info.get("name") else cfg.get("county_name", current_db)
+    
     base_dir = get_base_dir()
     available_dbs = await asyncio.to_thread(list_available_databases)
     
@@ -165,7 +267,17 @@ async def api_switch_db(req: SwitchDbRequest):
         return {"code": 404, "message": f"未在 PostgreSQL 实例中找到数据库 [{target_db}]"}
     
     cfg = load_config()
-    target_county = req.county_name.strip() if (req.county_name and req.county_name.strip()) else target_db
+    
+    # 优先解析该库代码表中的权威中文县名，避免将拼音作为县名
+    county_info, _ = await asyncio.to_thread(get_county_and_townships_sync, None, target_db)
+    parsed_name = county_info.get("name") if county_info else ""
+    
+    if req.county_name and req.county_name.strip():
+        target_county = req.county_name.strip()
+    elif parsed_name:
+        target_county = parsed_name
+    else:
+        target_county = target_db
     
     # 确保所选库存在基础系统表
     await asyncio.to_thread(ensure_database_and_tables, target_db, cfg)
@@ -196,6 +308,14 @@ async def api_switch_db(req: SwitchDbRequest):
 async def api_import_progress():
     progress = get_import_progress()
     return {"code": 200, "data": progress}
+
+@app.get("/api/audit-log/download")
+async def api_download_audit_log():
+    from fastapi.responses import FileResponse
+    log_path = os.path.join(os.path.dirname(__file__), "logs", "check_audit.log")
+    if os.path.exists(log_path):
+        return FileResponse(log_path, filename="check_audit.log", media_type="text/plain; charset=utf-8")
+    return {"code": 404, "message": "暂无核查审计日志文件"}
 
 @app.get("/api/import-log/download")
 async def api_download_import_log():
@@ -241,12 +361,50 @@ async def get_villages():
 
 @app.get("/api/contractors")
 async def get_contractors(qsdwdm: str):
+    clean_code = str(qsdwdm or "").strip()
+    search_prefix = clean_code
+
     async with SessionLocal() as session:
-        sql = text("SELECT cbfbm, cbfmc, lxdh FROM cbf WHERE cbfbm::text LIKE :code ORDER BY cbfbm")
-        result = await session.execute(sql, {"code": f"{qsdwdm}%"})
+        # 智能容错：如果前端传入的是中文村名（如“大墅社区”或“大墅镇 - 大墅社区”），自动从 qsdwdmb 反查其真实 12~14 位区划代码
+        if not clean_code.isdigit():
+            target_vname = clean_code.split(" - ")[-1].strip()
+            row_v = await session.execute(
+                text("SELECT qsdwdm FROM qsdwdmb WHERE qsdwmc = :name AND qsdwdm::text LIKE '%00' LIMIT 1"),
+                {"name": target_vname}
+            )
+            v_match = row_v.fetchone()
+            if v_match:
+                search_prefix = str(v_match[0])
+            else:
+                # 尝试模糊匹配村名
+                row_v2 = await session.execute(
+                    text("SELECT qsdwdm FROM qsdwdmb WHERE qsdwmc LIKE :name AND qsdwdm::text LIKE '%00' LIMIT 1"),
+                    {"name": f"%{target_vname}%"}
+                )
+                v_match2 = row_v2.fetchone()
+                if v_match2:
+                    search_prefix = str(v_match2[0])
+
+        # 如果是 14 位的行政村代码（以 00 结尾），截取前 12 位以匹配该村下所有组及承包方
+        if len(search_prefix) == 14 and search_prefix.endswith("00"):
+            search_prefix = search_prefix[:12]
+
+        sql = text("""
+            SELECT c.cbfbm, c.cbfmc, c.lxdh, COALESCE(q.qsdwmc, '') as group_name
+            FROM cbf c
+            LEFT JOIN qsdwdmb q ON SUBSTRING(c.cbfbm::text, 1, 14) = q.qsdwdm::text
+            WHERE c.cbfbm::text LIKE :code 
+            ORDER BY c.cbfbm
+        """)
+        result = await session.execute(sql, {"code": f"{search_prefix}%"})
         rows = result.fetchall()
-        data = [{"cbfbm": str(r[0]), "cbfmc": r[1], "lxdh": r[2]} for r in rows]
-        return {"code": 200, "data": data}
+        data = [{
+            "cbfbm": str(r[0]), 
+            "cbfmc": r[1], 
+            "lxdh": r[2] or "",
+            "group_name": r[3] or ""
+        } for r in rows]
+        return {"code": 200, "data": data, "total": len(data), "search_prefix": search_prefix}
 
 @app.get("/api/parcels")
 async def get_parcels(cbfbm: str):
@@ -323,20 +481,60 @@ async def get_neiye_townships():
         if not county and townships:
             county = {"code": townships[0]["code"][:6], "name": "全椒县", "full_code": townships[0]["code"][:6] + "00000000"}
 
+        # 动态从 waiye_samples 获取实际抽样的村列表
+        res_sampled_v = await session.execute(text("""
+            SELECT DISTINCT 
+                w.township_name, 
+                w.village_name, 
+                SUBSTRING(w.group_code, 1, 12) || '00' as village_code
+            FROM waiye_samples w
+            WHERE w.village_name IS NOT NULL AND w.village_name != ''
+            ORDER BY w.township_name, village_code
+        """))
+        sampled_villages = []
+        for r in res_sampled_v.fetchall():
+            t_name, v_name, v_code = r[0], r[1], str(r[2])
+            sampled_villages.append({
+                "code": v_code,
+                "name": v_name,
+                "township_name": t_name,
+                "full_title": f"{t_name} - {v_name}",
+                "level": "village"
+            })
+
         res_sampled = await session.execute(text("SELECT DISTINCT township_name FROM waiye_samples"))
         sampled_names = set(r[0] for r in res_sampled.fetchall() if r[0])
-
         sampled_townships = [t for t in townships if t["name"] in sampled_names]
 
-        return {"code": 200, "county": county, "townships": sampled_townships}
+        return {
+            "code": 200, 
+            "county": county, 
+            "townships": sampled_townships,
+            "villages": sampled_villages
+        }
 
 @app.get("/api/contractor_count")
 async def get_contractor_count(group_code: str):
+    clean_code = str(group_code or "").strip()
     async with SessionLocal() as session:
-        sql = text("SELECT COUNT(*) FROM cbf WHERE cbfbm::text LIKE :code")
-        res = await session.execute(sql, {"code": f"{group_code}%"})
-        count = res.scalar()
-        return {"code": 200, "count": count}
+        # 该发包方总承包方户数
+        sql_total = text("SELECT COUNT(*) FROM cbf WHERE cbfbm::text LIKE :code")
+        res_total = await session.execute(sql_total, {"code": f"{clean_code}%"})
+        total_count = res_total.scalar() or 0
+
+        # 该发包方已在 waiye_samples 中的去重承包方户数
+        sql_sampled = text("SELECT COUNT(DISTINCT cbfbm) FROM waiye_samples WHERE group_code = :code")
+        res_sampled = await session.execute(sql_sampled, {"code": clean_code})
+        sampled_count = res_sampled.scalar() or 0
+
+        remaining_count = max(total_count - sampled_count, 0)
+
+        return {
+            "code": 200, 
+            "count": total_count,
+            "sampled_count": sampled_count,
+            "remaining_count": remaining_count
+        }
 
 class SampleRequest(BaseModel):
     mode: int
@@ -526,77 +724,129 @@ async def do_sample(req: SampleRequest):
                 return {"code": 400, "message": "所选乡镇下无村民组"}
         
         stats = []
+        all_sampled_list = []
+        groups_to_delete = []
         
         for g in sampled_groups:
             g_code = str(g["code"])
             tz_name = g.get("tz_name", req.township_name)
+            
+            # 查询该组当前已经在 waiye_samples 中的农户编码集合，严禁重复抽样该农户
+            res_already = await session.execute(
+                text("SELECT DISTINCT cbfbm FROM waiye_samples WHERE group_code = :gc"),
+                {"gc": g_code}
+            )
+            already_sampled_cbfs = {str(r[0]) for r in res_already.fetchall() if r[0]}
+
             sql = text("SELECT cbfbm, cbfmc, lxdh FROM cbf WHERE cbfbm::text LIKE :code")
             res = await session.execute(sql, {"code": f"{g_code}%"})
             cbfs = res.fetchall()
             total_cbf = len(cbfs)
             
-            # 使用统一抽样数量算法
-            sample_size = calc_sample_size(total_cbf, req.manual_sample_count if req.mode == 1 else None)
-            
-            if sample_size > 0:
-                sampled = random.sample(cbfs, sample_size)
+            if req.mode == 1:
+                # Mode 1: 按村组手动抽样（支持增量补抽，绝不重复抽样已有农户，严禁删除历史外业记录）
+                unselected_cbfs = [c for c in cbfs if str(c[0]) not in already_sampled_cbfs]
+                if not unselected_cbfs:
+                    return {
+                        "code": 400,
+                        "message": f"该村组所有承包方（共 {total_cbf} 户）已全部抽样，无法重复抽样！"
+                    }
+                
+                # 计算待抽取数量
+                if req.manual_sample_count is not None and req.manual_sample_count > 0:
+                    needed_size = min(len(unselected_cbfs), req.manual_sample_count)
+                else:
+                    target_total = calc_sample_size(total_cbf, None)
+                    current_count = len(already_sampled_cbfs)
+                    needed_size = max(target_total - current_count, 1)
+                    needed_size = min(needed_size, len(unselected_cbfs))
+
+                sampled = random.sample(unselected_cbfs, needed_size)
+                
+                # Mode 1 不加入 groups_to_delete，严格保留已有外业记录
+                final_sampled_count = len(already_sampled_cbfs) + len(sampled)
                 stats.append({
                     "序号": len(stats) + 1,
                     "乡镇名称": tz_name,
                     "村名称": g["v_name"], 
                     "组名称": g["name"],
                     "发包方总户数": total_cbf,
-                    "抽样农户数5%": sample_size
+                    "抽样农户数5%": final_sampled_count
                 })
-                
-                # Delete existing samples for this group
-                await session.execute(text("DELETE FROM waiye_samples WHERE group_code = :g_code"), {"g_code": g_code})
-                
-                for idx, c in enumerate(sampled):
-                    sql_dk = text('''
-                        SELECT b.dkbm, a.dkmc, b.htmjm 
-                        FROM cbdkxx b
-                        LEFT JOIN dkxx_shp_attrs a ON a.dkbm = b.dkbm
-                        WHERE b.cbfbm::text = :cbfbm
-                    ''')
-                    res_dk = await session.execute(sql_dk, {"cbfbm": c[0]})
-                    dks = res_dk.fetchall()
-                    if not dks:
-                        await session.execute(text("""
-                            INSERT INTO waiye_samples (
-                                township_name, village_name, group_name, group_code,
-                                cbfmc, cbfbm, cbfbm_short, lxdh,
-                                dkmc, dkbm, dkbm_short, scmj
-                            ) VALUES (
-                                :t_name, :v_name, :g_name, :g_code,
-                                :cbfmc, :cbfbm, :cbfbm_short, :lxdh,
-                                '', '', '', 0
-                            )
-                        """), {
-                            "t_name": tz_name, "v_name": g["v_name"], "g_name": g["name"], "g_code": g_code,
-                            "cbfmc": c[1], "cbfbm": str(c[0]), "cbfbm_short": str(c[0])[-4:] if c[0] else "",
-                            "lxdh": str(c[2]) if c[2] else ""
-                        })
+                for c in sampled:
+                    all_sampled_list.append((tz_name, g["v_name"], g["name"], g_code, c))
+
+            else:
+                # Mode 2: 全镇随机重抽组
+                sample_size = calc_sample_size(total_cbf, None)
+                if sample_size > 0 and cbfs:
+                    sampled = random.sample(cbfs, min(sample_size, len(cbfs)))
+                    stats.append({
+                        "序号": len(stats) + 1,
+                        "乡镇名称": tz_name,
+                        "村名称": g["v_name"], 
+                        "组名称": g["name"],
+                        "发包方总户数": total_cbf,
+                        "抽样农户数5%": len(sampled)
+                    })
+                    groups_to_delete.append(g_code)
+                    for c in sampled:
+                        all_sampled_list.append((tz_name, g["v_name"], g["name"], g_code, c))
+
+        if groups_to_delete:
+            await session.execute(text("DELETE FROM waiye_samples WHERE group_code = ANY(:codes)"), {"codes": groups_to_delete})
+
+        if all_sampled_list:
+            all_cbfbms = [str(item[4][0]) for item in all_sampled_list if item[4][0]]
+            cbf_parcels_map = defaultdict(list)
+            if all_cbfbms:
+                res_dks = await session.execute(text("""
+                    SELECT b.cbfbm::text, b.dkbm::text, a.dkmc, b.htmjm 
+                    FROM cbdkxx b
+                    LEFT JOIN dkxx_shp_attrs a ON a.dkbm = b.dkbm
+                    WHERE b.cbfbm = ANY(:cbfbms)
+                """), {"cbfbms": all_cbfbms})
+                for r_dk in res_dks.fetchall():
+                    cbf_parcels_map[str(r_dk[0])].append(r_dk)
+
+            insert_rows = []
+            for tz_name, v_name, g_name, g_code, c in all_sampled_list:
+                cbfbm_str = str(c[0]) if c[0] else ""
+                cbfmc_str = c[1] or ""
+                cbfbm_short_str = cbfbm_str[-4:] if cbfbm_str else ""
+                lxdh_str = str(c[2]) if c[2] else ""
+                dks = cbf_parcels_map.get(cbfbm_str, [])
+                if not dks:
+                    insert_rows.append({
+                        "t_name": tz_name, "v_name": v_name, "g_name": g_name, "g_code": g_code,
+                        "cbfmc": cbfmc_str, "cbfbm": cbfbm_str, "cbfbm_short": cbfbm_short_str, "lxdh": lxdh_str,
+                        "dkmc": "", "dkbm": "", "dkbm_short": "", "scmj": 0.0
+                    })
+                else:
                     for dk in dks:
-                        await session.execute(text("""
-                            INSERT INTO waiye_samples (
-                                township_name, village_name, group_name, group_code,
-                                cbfmc, cbfbm, cbfbm_short, lxdh,
-                                dkmc, dkbm, dkbm_short, scmj
-                            ) VALUES (
-                                :t_name, :v_name, :g_name, :g_code,
-                                :cbfmc, :cbfbm, :cbfbm_short, :lxdh,
-                                :dkmc, :dkbm, :dkbm_short, :scmj
-                            )
-                        """), {
-                            "t_name": tz_name, "v_name": g["v_name"], "g_name": g["name"], "g_code": g_code,
-                            "cbfmc": c[1], "cbfbm": str(c[0]), "cbfbm_short": str(c[0])[-4:] if c[0] else "",
-                            "lxdh": str(c[2]) if c[2] else "",
-                            "dkmc": dk[1] or "",
-                            "dkbm": str(dk[0]) if dk[0] else "",
-                            "dkbm_short": str(dk[0])[-5:] if dk[0] else "",
-                            "scmj": float(dk[2]) if dk[2] is not None else 0.0
+                        dkbm_str = str(dk[1]) if dk[1] else ""
+                        insert_rows.append({
+                            "t_name": tz_name, "v_name": v_name, "g_name": g_name, "g_code": g_code,
+                            "cbfmc": cbfmc_str, "cbfbm": cbfbm_str, "cbfbm_short": cbfbm_short_str, "lxdh": lxdh_str,
+                            "dkmc": dk[2] or "",
+                            "dkbm": dkbm_str,
+                            "dkbm_short": dkbm_str[-5:] if dkbm_str else "",
+                            "scmj": float(dk[3]) if dk[3] is not None else 0.0
                         })
+
+            if insert_rows:
+                stmt = text("""
+                    INSERT INTO waiye_samples (
+                        township_name, village_name, group_name, group_code,
+                        cbfmc, cbfbm, cbfbm_short, lxdh,
+                        dkmc, dkbm, dkbm_short, scmj
+                    ) VALUES (
+                        :t_name, :v_name, :g_name, :g_code,
+                        :cbfmc, :cbfbm, :cbfbm_short, :lxdh,
+                        :dkmc, :dkbm, :dkbm_short, :scmj
+                    )
+                """)
+                await session.execute(stmt, insert_rows)
                         
         await session.commit()
         # 由于支持了多乡镇，生成附件5时优先使用传入的首个代码/名称（保持向后兼容，但附件5内部展示可能会按真实名称展示）
@@ -614,9 +864,10 @@ async def do_sample(req: SampleRequest):
 @app.get("/api/download")
 async def download_file(file: str):
     import urllib.parse
-    file = urllib.parse.unquote(file)
+    file = urllib.parse.unquote(file).strip()
     if not os.path.isabs(file):
-        backend_file = os.path.join(os.path.dirname(__file__), file)
+        clean_rel = file.lstrip("/\\")
+        backend_file = os.path.join(os.path.dirname(__file__), clean_rel)
         if os.path.exists(backend_file):
             file = backend_file
     if os.path.exists(file):
@@ -690,21 +941,12 @@ def extract_excel_group_info(row: dict) -> tuple:
 
 @app.post("/api/sample_by_excel/check")
 async def check_sample_by_excel(file: UploadFile = File(...)):
-    """预检上传的 Excel 抽样表格中各发包方的指定抽样户数是否符合验收规范要求"""
-    os.makedirs("uploads/抽样表", exist_ok=True)
-    temp_path = os.path.join("uploads/抽样表", f"check_{uuid.uuid4().hex}_{file.filename}")
-    with open(temp_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-        
+    """预检上传的 Excel 抽样表格中各发包方的指定抽样户数是否符合验收规范要求（纯内存解析，杜绝文件锁）"""
     try:
-        df = pd.read_excel(temp_path)
+        content = await file.read()
+        df = pd.read_excel(io.BytesIO(content))
     except Exception as e:
-        if os.path.exists(temp_path): os.remove(temp_path)
-        return {"code": 400, "message": "无法解析Excel文件，请检查文件格式是否有效"}
-    finally:
-        if os.path.exists(temp_path):
-            try: os.remove(temp_path)
-            except: pass
+        return {"code": 400, "message": f"无法解析Excel文件，请检查文件格式是否有效: {str(e)}"}
         
     required = ["发包方编码", "乡镇名", "村名", "组名"]
     for r in required:
@@ -716,6 +958,12 @@ async def check_sample_by_excel(file: UploadFile = File(...)):
         insufficient_list = []
         exceeded_list = []
         
+        # 村级维度统计聚合器: (village_code_prefix, township_name, village_name) -> dict
+        village_groups_map = defaultdict(lambda: {
+            "planned_sample_count": 0,
+            "groups": []
+        })
+
         for idx, row in df.iterrows():
             g_code, g_town, g_vill, g_name = extract_excel_group_info(row)
             group_desc = f"【{g_town} {g_vill} {g_name}】"
@@ -733,6 +981,8 @@ async def check_sample_by_excel(file: UploadFile = File(...)):
             total_cbf = res.scalar() or 0
             
             check_res = check_group_sample_compliance(total_cbf, sample_count, group_desc)
+            effective_sample_size = calc_sample_size(total_cbf, sample_count)
+
             item_data = {
                 "row_idx": idx + 1,
                 "group_code": g_code,
@@ -740,6 +990,7 @@ async def check_sample_by_excel(file: UploadFile = File(...)):
                 "village_name": g_vill,
                 "group_name": g_name,
                 "group_desc": group_desc,
+                "effective_sample_size": effective_sample_size,
                 **check_res
             }
             inspected_items.append(item_data)
@@ -748,6 +999,36 @@ async def check_sample_by_excel(file: UploadFile = File(...)):
                 insufficient_list.append(item_data)
             elif check_res["status"] == "exceeded":
                 exceeded_list.append(item_data)
+
+            # 聚合至村级统计
+            v_code_prefix = g_code[:12] if len(g_code) >= 12 else g_code
+            v_key = (v_code_prefix, g_town, g_vill)
+            village_groups_map[v_key]["planned_sample_count"] += effective_sample_size
+            village_groups_map[v_key]["groups"].append(g_name)
+
+        # 核验每个行政村的累计计划抽样数是否达到该村总户数的 5%
+        village_warnings = []
+        for (v_prefix, t_name, v_name), v_stat in village_groups_map.items():
+            res_v = await session.execute(text("SELECT COUNT(*) FROM cbf WHERE cbfbm::text LIKE :code"), {"code": f"{v_prefix}%"})
+            total_village_cbf = res_v.scalar() or 0
+            planned_cnt = v_stat["planned_sample_count"]
+            if total_village_cbf > 0:
+                required_5pct = math.ceil(total_village_cbf * 0.05)
+                if planned_cnt < required_5pct:
+                    shortage = required_5pct - planned_cnt
+                    rate_pct = round((planned_cnt / total_village_cbf) * 100, 1)
+                    village_warnings.append({
+                        "village_code": v_prefix,
+                        "township_name": t_name,
+                        "village_name": v_name,
+                        "village_desc": f"【{t_name} {v_name}】",
+                        "total_village_cbf": total_village_cbf,
+                        "sample_count": planned_cnt,
+                        "rate_pct": rate_pct,
+                        "required_5pct": required_5pct,
+                        "shortage": shortage,
+                        "summary_text": f"【{t_name} {v_name}】全村总户数 {total_village_cbf} 户，表格计划抽检 {planned_cnt} 户 ({rate_pct}%)，未达到全村总户数的 5%（规定至少需抽 {required_5pct} 户，尚缺 {shortage} 户）"
+                    })
                 
         return {
             "code": 200,
@@ -758,21 +1039,33 @@ async def check_sample_by_excel(file: UploadFile = File(...)):
                 "has_insufficient": len(insufficient_list) > 0,
                 "insufficient_list": insufficient_list,
                 "exceeded_list": exceeded_list,
+                "has_village_warning": len(village_warnings) > 0,
+                "village_warning_count": len(village_warnings),
+                "village_warnings": village_warnings,
                 "details": inspected_items
             }
         }
 
 @app.post("/api/sample_by_excel")
-async def do_sample_by_excel(file: UploadFile = File(...)):
-    os.makedirs("uploads/抽样表", exist_ok=True)
-    file_path = os.path.join("uploads/抽样表", file.filename)
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-        
+async def do_sample_by_excel(file: UploadFile = File(...), strategy: str = Form("append")):
+    # 1. 纯内存直接读取解析，彻底规避 Windows 文件独占锁 (Permission denied)
     try:
-        df = pd.read_excel(file_path)
+        content = await file.read()
+        df = pd.read_excel(io.BytesIO(content))
     except Exception as e:
-        return {"code": 400, "message": "无法解析Excel文件"}
+        return {"code": 400, "message": f"无法解析Excel文件: {str(e)}"}
+
+    # 2. 异步唯一命名安全归档备份（带时间戳和随机散列，绝不覆盖锁定文件，失败亦不影响核心业务）
+    try:
+        os.makedirs("uploads/抽样表", exist_ok=True)
+        name_root, name_ext = os.path.splitext(file.filename)
+        clean_root = sanitize_filename(name_root)
+        backup_filename = f"{clean_root}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}{name_ext}"
+        backup_path = os.path.join("uploads/抽样表", backup_filename)
+        with open(backup_path, "wb") as bf:
+            bf.write(content)
+    except Exception as save_err:
+        print(f"抽样表格归档副本异常 (已忽略): {save_err}")
         
     required = ["发包方编码", "乡镇名", "村名", "组名"]
     for r in required:
@@ -829,8 +1122,12 @@ async def do_sample_by_excel(file: UploadFile = File(...)):
                 "error_details": "\n".join(error_messages)
             }
 
-        # 2. 合规核验通过，开始执行抽样与写库
+        # 2. 合规核验通过，开始执行抽样与写库 (根据 strategy 处理 append增量补抽 或 overwrite覆盖重抽)
         stats = []
+        all_sampled_list = []
+        groups_to_delete = []
+        is_append_mode = (strategy == "append")
+
         # 获取首行真实乡镇名与代码
         first_code, first_town, _, _ = extract_excel_group_info(df.iloc[0]) if not df.empty else ("", "默认乡镇", "", "")
         township_name = first_town if first_town else "默认乡镇"
@@ -845,73 +1142,131 @@ async def do_sample_by_excel(file: UploadFile = File(...)):
             total_cbf = item["total_cbf"]
             sample_size = item["sample_size"]
             
-            if sample_size > 0 and cbfs:
-                sampled = random.sample(cbfs, min(sample_size, len(cbfs)))
+            if is_append_mode:
+                # 增量补抽模式：排除已抽农户，绝不覆盖已有外业记录与签名
+                res_already = await session.execute(
+                    text("SELECT DISTINCT cbfbm FROM waiye_samples WHERE group_code = :gc"),
+                    {"gc": g_code}
+                )
+                already_sampled_cbfs = {str(r[0]) for r in res_already.fetchall() if r[0]}
+                unselected_cbfs = [c for c in cbfs if str(c[0]) not in already_sampled_cbfs]
+                
+                needed_count = max(sample_size - len(already_sampled_cbfs), 0)
+                sampled = []
+                if needed_count > 0 and unselected_cbfs:
+                    sampled = random.sample(unselected_cbfs, min(needed_count, len(unselected_cbfs)))
+                
+                final_count = len(already_sampled_cbfs) + len(sampled)
                 stats.append({
                     "序号": len(stats) + 1,
                     "乡镇名称": g_town,
                     "村名称": g_vill, 
                     "组名称": g_name,
                     "发包方总户数": total_cbf,
-                    "抽样农户数5%": len(sampled)
+                    "抽样农户数5%": final_count
                 })
-                
-                await session.execute(text("DELETE FROM waiye_samples WHERE group_code = :g_code"), {"g_code": g_code})
-                
                 for c in sampled:
-                    sql_dk = text('''
-                        SELECT b.dkbm, a.dkmc, b.htmjm 
-                        FROM cbdkxx b
-                        LEFT JOIN dkxx_shp_attrs a ON a.dkbm = b.dkbm
-                        WHERE b.cbfbm::text = :cbfbm
-                    ''')
-                    res_dk = await session.execute(sql_dk, {"cbfbm": c[0]})
-                    dks = res_dk.fetchall()
-                    if not dks:
-                        await session.execute(text("""
-                            INSERT INTO waiye_samples (
-                                township_name, village_name, group_name, group_code,
-                                cbfmc, cbfbm, cbfbm_short, lxdh,
-                                dkmc, dkbm, dkbm_short, scmj
-                            ) VALUES (
-                                :t_name, :v_name, :g_name, :g_code,
-                                :cbfmc, :cbfbm, :cbfbm_short, :lxdh,
-                                '', '', '', 0
-                            )
-                        """), {
-                            "t_name": g_town, "v_name": g_vill, "g_name": g_name, "g_code": g_code,
-                            "cbfmc": c[1], "cbfbm": str(c[0]), "cbfbm_short": str(c[0])[-4:] if c[0] else "",
-                            "lxdh": str(c[2]) if c[2] else ""
-                        })
+                    all_sampled_list.append((g_town, g_vill, g_name, g_code, c))
+            else:
+                # 覆盖重抽模式：删除表格涉及组的既有抽样，全量重新抽取
+                if sample_size > 0 and cbfs:
+                    sampled = random.sample(cbfs, min(sample_size, len(cbfs)))
+                    stats.append({
+                        "序号": len(stats) + 1,
+                        "乡镇名称": g_town,
+                        "村名称": g_vill, 
+                        "组名称": g_name,
+                        "发包方总户数": total_cbf,
+                        "抽样农户数5%": len(sampled)
+                    })
+                    groups_to_delete.append(g_code)
+                    for c in sampled:
+                        all_sampled_list.append((g_town, g_vill, g_name, g_code, c))
+
+        if groups_to_delete:
+            await session.execute(text("DELETE FROM waiye_samples WHERE group_code = ANY(:codes)"), {"codes": groups_to_delete})
+
+        if all_sampled_list:
+            all_cbfbms = [str(item[4][0]) for item in all_sampled_list if item[4][0]]
+            cbf_parcels_map = defaultdict(list)
+            if all_cbfbms:
+                res_dks = await session.execute(text("""
+                    SELECT b.cbfbm::text, b.dkbm::text, a.dkmc, b.htmjm 
+                    FROM cbdkxx b
+                    LEFT JOIN dkxx_shp_attrs a ON a.dkbm = b.dkbm
+                    WHERE b.cbfbm = ANY(:cbfbms)
+                """), {"cbfbms": all_cbfbms})
+                for r_dk in res_dks.fetchall():
+                    cbf_parcels_map[str(r_dk[0])].append(r_dk)
+
+            insert_rows = []
+            for g_town, g_vill, g_name, g_code, c in all_sampled_list:
+                cbfbm_str = str(c[0]) if c[0] else ""
+                cbfmc_str = c[1] or ""
+                cbfbm_short_str = cbfbm_str[-4:] if cbfbm_str else ""
+                lxdh_str = str(c[2]) if c[2] else ""
+                dks = cbf_parcels_map.get(cbfbm_str, [])
+                if not dks:
+                    insert_rows.append({
+                        "t_name": g_town, "v_name": g_vill, "g_name": g_name, "g_code": g_code,
+                        "cbfmc": cbfmc_str, "cbfbm": cbfbm_str, "cbfbm_short": cbfbm_short_str, "lxdh": lxdh_str,
+                        "dkmc": "", "dkbm": "", "dkbm_short": "", "scmj": 0.0
+                    })
+                else:
                     for dk in dks:
-                        await session.execute(text("""
-                            INSERT INTO waiye_samples (
-                                township_name, village_name, group_name, group_code,
-                                cbfmc, cbfbm, cbfbm_short, lxdh,
-                                dkmc, dkbm, dkbm_short, scmj
-                            ) VALUES (
-                                :t_name, :v_name, :g_name, :g_code,
-                                :cbfmc, :cbfbm, :cbfbm_short, :lxdh,
-                                :dkmc, :dkbm, :dkbm_short, :scmj
-                            )
-                        """), {
+                        dkbm_str = str(dk[1]) if dk[1] else ""
+                        insert_rows.append({
                             "t_name": g_town, "v_name": g_vill, "g_name": g_name, "g_code": g_code,
-                            "cbfmc": c[1], "cbfbm": str(c[0]), "cbfbm_short": str(c[0])[-4:] if c[0] else "",
-                            "lxdh": str(c[2]) if c[2] else "",
-                            "dkmc": dk[1] or "",
-                            "dkbm": str(dk[0]) if dk[0] else "",
-                            "dkbm_short": str(dk[0])[-5:] if dk[0] else "",
-                            "scmj": float(dk[2]) if dk[2] is not None else 0.0
+                            "cbfmc": cbfmc_str, "cbfbm": cbfbm_str, "cbfbm_short": cbfbm_short_str, "lxdh": lxdh_str,
+                            "dkmc": dk[2] or "",
+                            "dkbm": dkbm_str,
+                            "dkbm_short": dkbm_str[-5:] if dkbm_str else "",
+                            "scmj": float(dk[3]) if dk[3] is not None else 0.0
                         })
+
+            if insert_rows:
+                stmt = text("""
+                    INSERT INTO waiye_samples (
+                        township_name, village_name, group_name, group_code,
+                        cbfmc, cbfbm, cbfbm_short, lxdh,
+                        dkmc, dkbm, dkbm_short, scmj
+                    ) VALUES (
+                        :t_name, :v_name, :g_name, :g_code,
+                        :cbfmc, :cbfbm, :cbfbm_short, :lxdh,
+                        :dkmc, :dkbm, :dkbm_short, :scmj
+                    )
+                """)
+                await session.execute(stmt, insert_rows)
         
         await session.commit()
         url_att5 = await asyncio.to_thread(export_att5, stats, township_code, township_name)
         
+        # 统计该批次涉及的各村最终抽查率是否达到 5%
+        village_warnings = []
+        v_stat_map = defaultdict(int)
+        for s in stats:
+            v_stat_map[(s["乡镇名称"], s["村名称"])] += s["抽样农户数5%"]
+
+        for (t_name, v_name), v_total_sample in v_stat_map.items():
+            res_v = await session.execute(text("""
+                SELECT COUNT(*) FROM cbf WHERE cbfbm::text LIKE (
+                    SELECT SUBSTRING(group_code, 1, 12) || '%' FROM waiye_samples WHERE township_name = :tn AND village_name = :vn LIMIT 1
+                )
+            """), {"tn": t_name, "vn": v_name})
+            total_village_cbf = res_v.scalar() or 0
+            if total_village_cbf > 0:
+                required_5pct = math.ceil(total_village_cbf * 0.05)
+                if v_total_sample < required_5pct:
+                    shortage = required_5pct - v_total_sample
+                    rate_pct = round((v_total_sample / total_village_cbf) * 100, 1)
+                    village_warnings.append(f"【{t_name} {v_name}】全村总户数 {total_village_cbf} 户，累计抽检 {v_total_sample} 户 ({rate_pct}%)，未达到该村总户数的 5%（建议补抽 {shortage} 户）")
+
         return {
             "code": 200, 
             "message": "抽样成功！抽样统计表已生成，抽样数据已保存至外业核查数据库。",
             "stats": stats,
-            "urls": [url_att5]
+            "urls": [url_att5],
+            "village_warnings": village_warnings
         }
 
 
@@ -955,6 +1310,91 @@ async def clear_samples(req: Optional[SampleClearRequest] = None):
         await session.commit()
         return {"code": 200, "message": msg}
 
+@app.get("/api/sample/group_contractors")
+async def get_sample_group_contractors(group_code: str):
+    """
+    获取指定发包方（村民小组）下已抽样的承包方列表
+    """
+    clean_code = str(group_code or "").strip()
+    if not clean_code:
+        return {"code": 400, "message": "发包方编码不能为空"}
+    
+    async with SessionLocal() as session:
+        sql = text("""
+            SELECT DISTINCT cbfbm, cbfmc, cbfbm_short, township_name, village_name, group_name
+            FROM waiye_samples
+            WHERE group_code = :gc
+            ORDER BY cbfbm
+        """)
+        res = await session.execute(sql, {"gc": clean_code})
+        rows = res.fetchall()
+        data = []
+        for r in rows:
+            cbfbm_str = str(r[0]) if r[0] else ""
+            cbfbm_short_str = str(r[2]) if r[2] else (cbfbm_str[-4:] if cbfbm_str else "")
+            data.append({
+                "cbfbm": cbfbm_str,
+                "cbfmc": r[1] or "",
+                "cbfbm_short": cbfbm_short_str,
+                "township_name": r[3] or "",
+                "village_name": r[4] or "",
+                "group_name": r[5] or ""
+            })
+        return {"code": 200, "data": data, "total": len(data)}
+
+class SampleDeleteContractorRequest(BaseModel):
+    group_code: str
+    cbfbm: str
+
+@app.post("/api/sample/delete_contractor")
+async def delete_sample_contractor(req: SampleDeleteContractorRequest, request: Request = None):
+    """
+    删除抽样数据中指定小组下的指定农户（仅从 waiye_samples 中删除，绝不更新主表 cbf）
+    """
+    clean_gc = str(req.group_code or "").strip()
+    clean_cbfbm = str(req.cbfbm or "").strip()
+    if not clean_gc or not clean_cbfbm:
+        return {"code": 400, "message": "发包方编码和承包方编码均不能为空"}
+
+    async with SessionLocal() as session:
+        # 查询该农户信息以便审计
+        r_info = await session.execute(
+            text("SELECT cbfmc, township_name, village_name, group_name FROM waiye_samples WHERE group_code = :gc AND cbfbm = :cbfbm LIMIT 1"),
+            {"gc": clean_gc, "cbfbm": clean_cbfbm}
+        )
+        row = r_info.fetchone()
+        if not row:
+            return {"code": 404, "message": "未在抽样数据中找到该农户记录"}
+        
+        cbfmc = row[0] or clean_cbfbm
+        target_str = f"{row[1]} {row[2]} {row[3]} ({cbfmc})"
+
+        # 1. 从外业抽样表中彻底删除该农户名下的所有地块抽样记录
+        res_del = await session.execute(
+            text("DELETE FROM waiye_samples WHERE group_code = :gc AND cbfbm = :cbfbm"),
+            {"gc": clean_gc, "cbfbm": clean_cbfbm}
+        )
+        del_count = res_del.rowcount
+
+        # 2. 同步清理可能的询问笔录记录
+        await session.execute(
+            text("DELETE FROM waiye_inquiries WHERE cbfbm = :cbfbm"),
+            {"cbfbm": clean_cbfbm}
+        )
+
+        await session.commit()
+
+        # 3. 审计日志
+        record_check_audit(
+            module_type="抽样管理",
+            action_type="删除指定抽样农户",
+            target_desc=target_str,
+            details=f"从村民小组 (编码: {clean_gc}) 中剔除抽样农户 [{cbfmc}] (编码: {clean_cbfbm})，共移除 {del_count} 宗抽样地块",
+            request=request
+        )
+
+        return {"code": 200, "message": f"农户【{cbfmc}】已成功从当前抽样中移除！", "deleted_parcels": del_count}
+
 # ================= 内业核查 API =================
 
 class NeiyeSaveRequest(BaseModel):
@@ -965,7 +1405,7 @@ class NeiyeSaveRequest(BaseModel):
     score: float
 
 @app.post("/api/save_neiye")
-async def save_neiye(req: NeiyeSaveRequest):
+async def save_neiye(req: NeiyeSaveRequest, request: Request = None):
     try:
         async with SessionLocal() as session:
             sql = text('''
@@ -986,6 +1426,20 @@ async def save_neiye(req: NeiyeSaveRequest):
                 "score": req.score
             })
             await session.commit()
+            
+            # 记录内业保存审计日志
+            jcz = req.form_data.get("jcz_name", "")
+            fhz = req.form_data.get("fhz_name", "")
+            checker_info = f"检查者:{jcz} 复核者:{fhz}" if (jcz or fhz) else ""
+            audit_detail = f"保存分值: {req.score}分 (层级: {req.level}) {checker_info}".strip()
+            record_check_audit(
+                module_type="内业核查",
+                action_type="保存内业评分",
+                target_desc=f"{req.qsdwmc} ({req.qsdwdm})",
+                details=audit_detail,
+                request=request
+            )
+            
             return {"code": 200, "message": "保存成功"}
     except Exception as e:
         print(f"save_neiye error: {e}")
@@ -1005,10 +1459,12 @@ class ExportNeiyeAtt6Request(BaseModel):
     qsdwdm: str
     qsdwmc: str
     level: str
+    township_name: Optional[str] = None
+    village_name: Optional[str] = None
     form_data: Optional[dict] = None
 
 @app.post("/api/export_neiye_att6")
-async def api_export_neiye_att6(req: ExportNeiyeAtt6Request):
+async def api_export_neiye_att6(req: ExportNeiyeAtt6Request, request: Request = None):
     try:
         form_data = req.form_data
         if not form_data:
@@ -1020,16 +1476,37 @@ async def api_export_neiye_att6(req: ExportNeiyeAtt6Request):
                 
         if req.level == 'county':
             url = await asyncio.to_thread(export_neiye_att6_county, form_data)
+        elif req.level == 'township':
+            # 乡镇级内业核查：同县级，仅导出机制运行 1/4，书签严格映射为 XX县XX镇
+            url = await asyncio.to_thread(
+                export_neiye_att6_mechanism_only,
+                form_data,
+                is_county=False,
+                township_name=req.township_name or req.qsdwmc
+            )
         else:
-            url = await asyncio.to_thread(export_neiye_att6_township, req.qsdwmc, form_data)
+            url = await asyncio.to_thread(
+                export_neiye_att6_township, 
+                req.qsdwmc, 
+                form_data, 
+                req.township_name, 
+                req.village_name
+            )
             
+        record_check_audit(
+            module_type="内业核查",
+            action_type="导出附件6检查记录表",
+            target_desc=f"{req.qsdwmc} ({req.level})",
+            details=f"生成文档: {url.split('file=')[-1]}",
+            request=request
+        )
         return {"code": 200, "url": url}
     except Exception as e:
         print(f"api_export_neiye_att6 error: {e}")
         return {"code": 500, "message": f"生成附件6失败: {str(e)}"}
 
 @app.get("/api/export_neiye_att7")
-async def api_export_neiye_att7():
+async def api_export_neiye_att7(request: Request = None):
     async with SessionLocal() as session:
         sql = text("SELECT qsdwdm, form_data, score FROM neiye_records")
         res = await session.execute(sql)
@@ -1041,7 +1518,26 @@ async def api_export_neiye_att7():
                 "score": float(r[2]) if r[2] is not None else 0.0
             }
         
-    url = await asyncio.to_thread(export_neiye_att7, records_dict)
+        # 构建乡镇 -> 其下抽样村代码列表的映射
+        res_sampled_v = await session.execute(text("""
+            SELECT DISTINCT 
+                w.township_name, 
+                SUBSTRING(w.group_code, 1, 12) || '00' as village_code
+            FROM waiye_samples w
+            WHERE w.village_name IS NOT NULL AND w.village_name != ''
+        """))
+        ts_v_map = defaultdict(list)
+        for r in res_sampled_v.fetchall():
+            ts_v_map[r[0]].append(str(r[1]))
+        
+    url = await asyncio.to_thread(export_neiye_att7, records_dict, dict(ts_v_map))
+    record_check_audit(
+        module_type="内业核查",
+        action_type="导出附件7内业检查得分表",
+        target_desc="全县内业得分汇总",
+        details=f"生成文档: {url.split('file=')[-1]}",
+        request=request
+    )
     return {"code": 200, "url": url}
 
 # ================= 外业核查 API =================
@@ -1078,6 +1574,10 @@ async def get_waiye_hierarchy():
         for t_name, v_dict in township_map.items():
             v_children = []
             for v_name, g_list in v_dict.items():
+                # 提取村级真实 14 位区划代码 (组编码前 12 位 + '00')
+                first_gcode = str(g_list[0]["code"]) if g_list else ""
+                v_code = (first_gcode[:12] + "00") if len(first_gcode) >= 12 else v_name
+
                 g_children = [
                     {
                         "text": f"{g['name']} ({g['cbf_count']}户/{g['dk_count']}地块)",
@@ -1085,6 +1585,7 @@ async def get_waiye_hierarchy():
                         "group_name": g["name"],
                         "group_code": g["code"],
                         "village_name": v_name,
+                        "village_code": v_code,
                         "township_name": t_name,
                         "cbf_count": g["cbf_count"],
                         "dk_count": g["dk_count"]
@@ -1093,7 +1594,8 @@ async def get_waiye_hierarchy():
                 ]
                 v_children.append({
                     "text": v_name,
-                    "value": v_name,
+                    "value": v_code,
+                    "village_code": v_code,
                     "village_name": v_name,
                     "township_name": t_name,
                     "children": g_children
@@ -1186,7 +1688,7 @@ class SignatureSaveRequest(BaseModel):
     signature_data: str
 
 @app.post("/api/waiye/save_signature")
-async def save_waiye_signature(req: SignatureSaveRequest):
+async def save_waiye_signature(req: SignatureSaveRequest, request: Request = None):
     os.makedirs(os.path.join("uploads", "signatures"), exist_ok=True)
     raw_b64 = req.signature_data
     if "," in raw_b64:
@@ -1227,6 +1729,14 @@ async def save_waiye_signature(req: SignatureSaveRequest):
             "cbfbm": req.cbfbm
         })
         await session.commit()
+
+    record_check_audit(
+        module_type="外业核查",
+        action_type="承包方代表手写签名",
+        target_desc=f"{req.cbfmc} ({req.cbfbm})",
+        details=f"电子签名文件: {req.cbfbm}.png 已保存并关联对应地块",
+        request=request
+    )
         
     return {
         "code": 200,
@@ -1260,7 +1770,7 @@ class WaiyeSaveRequest(BaseModel):
     records: List[WaiyeRecordItem]
 
 @app.post("/api/waiye/save_records")
-async def save_waiye_records(req: WaiyeSaveRequest):
+async def save_waiye_records(req: WaiyeSaveRequest, request: Request = None):
     async with SessionLocal() as session:
         sql = text("""
             UPDATE waiye_samples SET
@@ -1290,7 +1800,68 @@ async def save_waiye_records(req: WaiyeSaveRequest):
                 "phone_cor": item.phone_correct or ""
             })
         await session.commit()
+        
+        # 获取首条样本的组别信息以便审计展示
+        if req.records:
+            first_id = req.records[0].id
+            r_info = await session.execute(text("SELECT township_name, village_name, group_name FROM waiye_samples WHERE id = :id"), {"id": first_id})
+            row_inf = r_info.fetchone()
+            target_str = f"{row_inf[0]} {row_inf[1]} {row_inf[2]}" if row_inf else f"记录ID: {first_id}"
+            record_check_audit(
+                module_type="外业核查",
+                action_type="保存外业地块核查状态",
+                target_desc=target_str,
+                details=f"批量更新了 {len(req.records)} 宗地块的核查指标（权属、四至、成员、满意度）",
+                request=request
+            )
+
         return {"code": 200, "message": "保存成功"}
+
+class WaiyePhoneUpdateRequest(BaseModel):
+    cbfbm: str
+    lxdh: str
+
+@app.post("/api/waiye/update_phone")
+async def api_update_waiye_phone(req: WaiyePhoneUpdateRequest, request: Request = None):
+    """
+    仅更新外业抽样核查表 waiye_samples 中的农户联系电话，严禁修改原始主表 cbf
+    """
+    clean_cbfbm = str(req.cbfbm or "").strip()
+    clean_lxdh = str(req.lxdh or "").strip()
+    if not clean_cbfbm:
+        return {"code": 400, "message": "承包方编码不能为空"}
+
+    async with SessionLocal() as session:
+        # 查询该承包方在 waiye_samples 中的信息以便审计
+        r_info = await session.execute(
+            text("SELECT cbfmc, township_name, village_name, group_name FROM waiye_samples WHERE cbfbm = :cbfbm LIMIT 1"),
+            {"cbfbm": clean_cbfbm}
+        )
+        row = r_info.fetchone()
+        cbfmc = row[0] if row else clean_cbfbm
+        target_str = f"{row[1]} {row[2]} {row[3]} ({cbfmc})" if row else clean_cbfbm
+
+        # 仅更新 waiye_samples 表，绝不触碰 cbf
+        res = await session.execute(
+            text("""
+                UPDATE waiye_samples 
+                SET lxdh = :lxdh, updated_at = CURRENT_TIMESTAMP 
+                WHERE cbfbm = :cbfbm
+            """),
+            {"cbfbm": clean_cbfbm, "lxdh": clean_lxdh}
+        )
+        await session.commit()
+
+        # 审计日志
+        record_check_audit(
+            module_type="外业核查",
+            action_type="外业补录联系电话",
+            target_desc=target_str,
+            details=f"承包方 [{cbfmc}] (编码: {clean_cbfbm}) 联系电话更新为: {clean_lxdh or '（空）'}",
+            request=request
+        )
+
+        return {"code": 200, "message": "电话更新成功", "lxdh": clean_lxdh, "updated_count": res.rowcount}
 
 class ExportWaiyeAtt8Request(BaseModel):
     township_name: str
@@ -1299,7 +1870,7 @@ class ExportWaiyeAtt8Request(BaseModel):
     group_code: Optional[str] = None
 
 @app.post("/api/export_waiye_att8")
-async def api_export_waiye_att8(req: ExportWaiyeAtt8Request):
+async def api_export_waiye_att8(req: ExportWaiyeAtt8Request, request: Request = None):
     async with SessionLocal() as session:
         if req.group_code:
             sql = text("""
@@ -1377,6 +1948,15 @@ async def api_export_waiye_att8(req: ExportWaiyeAtt8Request):
                 g_rows
             )
             urls.append(url)
+
+        scope_desc = f"{req.township_name} {req.village_name or ''} {req.group_name or ''}".strip()
+        record_check_audit(
+            module_type="外业核查",
+            action_type="导出附件8外业核查记录表",
+            target_desc=scope_desc,
+            details=f"成功生成 {len(urls)} 份附件8文档",
+            request=request
+        )
             
         return {
             "code": 200, 
@@ -1387,7 +1967,7 @@ async def api_export_waiye_att8(req: ExportWaiyeAtt8Request):
         }
 
 @app.get("/api/export_waiye_att9")
-async def api_export_waiye_att9():
+async def api_export_waiye_att9(request: Request = None):
     from database import SessionLocal
     from sqlalchemy import text
     async with SessionLocal() as session:
@@ -1431,7 +2011,209 @@ async def api_export_waiye_att9():
             })
             
     url = await asyncio.to_thread(export_waiye_att9, samples_rows)
+    record_check_audit(
+        module_type="外业核查",
+        action_type="导出附件9外业检查得分表",
+        target_desc="全县外业抽检汇总",
+        details=f"生成文档: {url.split('file=')[-1]}",
+        request=request
+    )
     return {"code": 200, "url": url}
+
+@app.get("/api/tasks/progress_dashboard")
+async def get_tasks_progress_dashboard():
+    from database import SessionLocal, parse_qsdwdmb_hierarchy, load_config
+    from doc_exporter import calculate_neiye_subscores
+    async with SessionLocal() as session:
+        # 1. 查询县级信息与全部乡镇列表
+        res_h = await session.execute(text("SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm"))
+        county_info, all_townships = parse_qsdwdmb_hierarchy(res_h.fetchall())
+        county_name = county_info.get("name", "全县")
+        total_townships_count = len(all_townships)
+
+        # 2. 查询各已抽样乡镇的外业总体情况（组数、农户数、地块数、签名数、核对数、错误项）
+        res_wai = await session.execute(text("""
+            SELECT township_name,
+                   COUNT(DISTINCT group_code) as group_count,
+                   COUNT(DISTINCT cbfbm) as farmer_count,
+                   COUNT(*) as parcel_count,
+                   COUNT(DISTINCT CASE WHEN signature_url IS NOT NULL AND signature_url != '' THEN cbfbm END) as signed_farmers,
+                   COUNT(DISTINCT CASE WHEN area_acknowledged != '' OR rights_correct != '' OR bound_correct != '' OR member_qualified != '' OR self_verified != '' OR self_signed != '' THEN cbfbm END) as checked_farmers,
+                   SUM(CASE WHEN area_acknowledged = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN rights_correct = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN bound_correct = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN member_qualified = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN self_verified = 'X' THEN 1 ELSE 0 END +
+                       CASE WHEN self_signed = 'X' THEN 1 ELSE 0 END) as total_errors,
+                   SUM(CASE WHEN satisfaction = '满意' THEN 1 ELSE 0 END) as sat_count
+            FROM waiye_samples
+            WHERE township_name IS NOT NULL AND township_name != ''
+            GROUP BY township_name
+            ORDER BY township_name
+        """))
+        wai_map = {}
+        for r in res_wai.fetchall():
+            wai_map[r[0]] = {
+                "group_count": int(r[1]),
+                "farmer_count": int(r[2]),
+                "parcel_count": int(r[3]),
+                "signed_farmers": int(r[4] or 0),
+                "checked_farmers": int(r[5] or 0),
+                "total_errors": int(r[6] or 0),
+                "sat_count": int(r[7] or 0)
+            }
+
+        # 3. 查询每个乡镇下抽样的具体行政村列表
+        res_v = await session.execute(text("""
+            SELECT DISTINCT township_name, village_name, SUBSTRING(group_code, 1, 12) || '00' as village_code
+            FROM waiye_samples
+            WHERE village_name IS NOT NULL AND village_name != ''
+            ORDER BY township_name, village_code
+        """))
+        town_villages = defaultdict(list)
+        for r in res_v.fetchall():
+            town_villages[r[0]].append({
+                "village_name": r[1],
+                "village_code": str(r[2])
+            })
+
+        # 4. 查询已保存的内业记录
+        res_n = await session.execute(text("SELECT qsdwdm, qsdwmc, form_data, score FROM neiye_records"))
+        neiye_records_map = {}
+        for r in res_n.fetchall():
+            code_str = str(r[0])
+            score_val = float(r[3]) if r[3] is not None else None
+            neiye_records_map[code_str] = {
+                "qsdwmc": r[1],
+                "form_data": r[2] or {},
+                "score": score_val
+            }
+
+        # 5. 组织已抽样乡镇的卡片列表
+        township_list = []
+        total_groups_sum = 0
+        total_farmers_sum = 0
+        total_parcels_sum = 0
+        total_villages_sum = 0
+        completed_villages_sum = 0
+        total_signed_farmers_sum = 0
+
+        # 按区划代码顺序排列已抽样乡镇
+        ordered_townships = [t["name"] for t in all_townships if t["name"] in wai_map]
+        if not ordered_townships:
+            ordered_townships = list(wai_map.keys())
+
+        for t_name in ordered_townships:
+            w_info = wai_map[t_name]
+            v_list = town_villages.get(t_name, [])
+            
+            # 内业村级进度分析
+            v_details = []
+            v_scores = []
+            for v_item in v_list:
+                v_code = v_item["village_code"]
+                has_done = (v_code in neiye_records_map)
+                cur_sc = None
+                if has_done:
+                    nr = neiye_records_map[v_code]
+                    if nr["score"] is not None:
+                        cur_sc = nr["score"]
+                    else:
+                        sub = calculate_neiye_subscores(nr["form_data"])["score"]
+                        cur_sc = sub.get("total", 0.0)
+                    v_scores.append(cur_sc)
+
+                v_details.append({
+                    "village_name": v_item["village_name"],
+                    "village_code": v_code,
+                    "completed": has_done,
+                    "score": cur_sc
+                })
+
+            total_v_cnt = len(v_list)
+            done_v_cnt = len([v for v in v_details if v["completed"]])
+            neiye_pct = round((done_v_cnt / total_v_cnt * 100), 1) if total_v_cnt > 0 else 0.0
+            avg_neiye_score = round(sum(v_scores) / len(v_scores), 1) if v_scores else None
+
+            # 外业进度分析
+            total_f_cnt = w_info["farmer_count"]
+            signed_f_cnt = w_info["signed_farmers"]
+            checked_f_cnt = w_info["checked_farmers"]
+            waiye_pct = round((signed_f_cnt / total_f_cnt * 100), 1) if total_f_cnt > 0 else 0.0
+            
+            err_cnt = w_info["total_errors"]
+            sat_cnt = w_info["sat_count"]
+            p_cnt = w_info["parcel_count"]
+            prog_score = max(round(20.0 - err_cnt * 0.5, 1), 0.0)
+            effect_score = round(sat_cnt / p_cnt * 10.0, 1) if p_cnt > 0 else 10.0
+
+            # 综合状态判断
+            if neiye_pct == 100.0 and (waiye_pct == 100.0 or checked_f_cnt >= total_f_cnt):
+                status_code = "completed"
+                status_text = "已完成"
+            elif neiye_pct > 0 or waiye_pct > 0 or checked_f_cnt > 0:
+                status_code = "in_progress"
+                status_text = "进行中"
+            else:
+                status_code = "not_started"
+                status_text = "待核查"
+
+            # 累计全县总量
+            total_groups_sum += w_info["group_count"]
+            total_farmers_sum += total_f_cnt
+            total_parcels_sum += p_cnt
+            total_villages_sum += total_v_cnt
+            completed_villages_sum += done_v_cnt
+            total_signed_farmers_sum += signed_f_cnt
+
+            township_list.append({
+                "township_name": t_name,
+                "group_count": w_info["group_count"],
+                "farmer_count": total_f_cnt,
+                "parcel_count": p_cnt,
+                "status_code": status_code,
+                "status_text": status_text,
+                "neiye": {
+                    "total_villages": total_v_cnt,
+                    "completed_villages": done_v_cnt,
+                    "percent": neiye_pct,
+                    "avg_score": avg_neiye_score,
+                    "village_details": v_details
+                },
+                "waiye": {
+                    "total_farmers": total_f_cnt,
+                    "signed_farmers": signed_f_cnt,
+                    "checked_farmers": checked_f_cnt,
+                    "percent": waiye_pct,
+                    "prog_score": prog_score,
+                    "effect_score": effect_score
+                }
+            })
+
+        global_neiye_pct = round((completed_villages_sum / total_villages_sum * 100), 1) if total_villages_sum > 0 else 0.0
+        global_waiye_pct = round((total_signed_farmers_sum / total_farmers_sum * 100), 1) if total_farmers_sum > 0 else 0.0
+
+        return {
+            "code": 200,
+            "data": {
+                "global_stats": {
+                    "county_name": county_name,
+                    "total_townships": total_townships_count,
+                    "sampled_townships_count": len(township_list),
+                    "sampled_groups_count": total_groups_sum,
+                    "sampled_farmers_count": total_farmers_sum,
+                    "sampled_parcels_count": total_parcels_sum,
+                    "neiye_total_villages": total_villages_sum,
+                    "neiye_completed_villages": completed_villages_sum,
+                    "neiye_percent": global_neiye_pct,
+                    "waiye_total_farmers": total_farmers_sum,
+                    "waiye_signed_farmers": total_signed_farmers_sum,
+                    "waiye_percent": global_waiye_pct,
+                    "is_groups_compliant": total_groups_sum >= 20
+                },
+                "township_list": township_list
+            }
+        }
 
 @app.get("/api/waiye/townships_summary")
 async def get_waiye_townships_summary():
@@ -1520,39 +2302,20 @@ class ExportAtt1011Request(BaseModel):
     
 @app.get("/api/score/summary")
 async def get_score_summary():
-    from score_service import get_all_township_scores
+    from score_service import get_all_township_scores, calculate_county_averages
     async with SessionLocal() as session:
         scores, c_mech, has_c = await get_all_township_scores(session)
         
-    county_mech = 15.0
-    county_prog_nei = 30.0
-    county_policy = 15.0
-    county_effect_nei = 10.0
-    county_prog_wai = 20.0
-    county_effect_wai = 10.0
-    
-    if len(scores) > 0:
-        mech_sum = sum(s["mech"] for s in scores.values())
-        if has_c:
-            county_mech = (mech_sum + c_mech) / (len(scores) + 1)
-        else:
-            county_mech = mech_sum / len(scores)
-            
-        county_prog_nei = sum(s["prog_nei"] for s in scores.values()) / len(scores)
-        county_policy = sum(s["policy"] for s in scores.values()) / len(scores)
-        county_effect_nei = sum(s["effect_nei"] for s in scores.values()) / len(scores)
-        county_prog_wai = sum(s["prog_wai"] for s in scores.values()) / len(scores)
-        county_effect_wai = sum(s["effect_wai"] for s in scores.values()) / len(scores)
-        
+    county_avg = calculate_county_averages(scores, c_mech, has_c)
     return {
         "code": 200,
         "data": {
-            "mech": round(county_mech, 1),
-            "prog_nei": round(county_prog_nei, 1),
-            "policy": round(county_policy, 1),
-            "effect_nei": round(county_effect_nei, 1),
-            "prog_wai": round(county_prog_wai, 1),
-            "effect_wai": round(county_effect_wai, 1)
+            "mech": county_avg["mech"],
+            "prog_nei": county_avg["prog_nei"],
+            "policy": county_avg["policy"],
+            "effect_nei": county_avg["effect_nei"],
+            "prog_wai": county_avg["prog_wai"],
+            "effect_wai": county_avg["effect_wai"]
         }
     }
 
@@ -1567,48 +2330,60 @@ async def api_export_att10():
 
 @app.post("/api/export_att11")
 async def api_export_att11(req: ExportAtt1011Request):
-    from score_service import get_all_township_scores
+    from score_service import get_all_township_scores, calculate_county_averages
     from doc_exporter_score import export_att11
     async with SessionLocal() as session:
         scores, c_mech, has_c = await get_all_township_scores(session)
         
-    county_mech = 15.0
-    county_prog_nei = 30.0
-    county_policy = 15.0
-    county_effect_nei = 10.0
-    county_prog_wai = 20.0
-    county_effect_wai = 10.0
-    
-    if len(scores) > 0:
-        mech_sum = sum(s["mech"] for s in scores.values())
-        if has_c:
-            county_mech = (mech_sum + c_mech) / (len(scores) + 1)
-        else:
-            county_mech = mech_sum / len(scores)
-            
-        county_prog_nei = sum(s["prog_nei"] for s in scores.values()) / len(scores)
-        county_policy = sum(s["policy"] for s in scores.values()) / len(scores)
-        county_effect_nei = sum(s["effect_nei"] for s in scores.values()) / len(scores)
-        county_prog_wai = sum(s["prog_wai"] for s in scores.values()) / len(scores)
-        county_effect_wai = sum(s["effect_wai"] for s in scores.values()) / len(scores)
-        
-    county_avg = {
-        "mech": county_mech,
-        "prog_nei": county_prog_nei,
-        "policy": county_policy,
-        "effect_nei": county_effect_nei,
-        "prog_wai": county_prog_wai,
-        "effect_wai": county_effect_wai
-    }
+    county_avg = calculate_county_averages(scores, c_mech, has_c)
     deduct = (0.5 if req.special1 else 0.0) + (1.0 if req.special2 else 0.0) + req.special3
-    final_score = round(county_mech, 1) + round(county_prog_nei, 1) + round(county_policy, 1) + round(county_effect_nei, 1) + round(county_prog_wai, 1) + round(county_effect_wai, 1) - deduct
-    final_score = max(final_score, 0.0)
+    final_score = county_avg["mech"] + county_avg["prog_nei"] + county_avg["policy"] + county_avg["effect_nei"] + county_avg["prog_wai"] + county_avg["effect_wai"] - deduct
+    final_score = max(round(final_score, 1), 0.0)
     
     url = await asyncio.to_thread(export_att11, county_avg, req.special1, req.special2, req.special3, final_score)
     return {"code": 200, "url": url}
 
-
 # ================= 自查整改（附件12 / 附件13） =================
+
+class ExportSampleDetailExcelRequest(BaseModel):
+    township_name: str
+
+@app.post("/api/export_sample_detail_excel")
+async def api_export_sample_detail_excel(req: ExportSampleDetailExcelRequest, request: Request = None):
+    """单独导出指定乡镇自查抽样农户明细表 Excel (.xlsx)"""
+    async with SessionLocal() as session:
+        r_cbf_detail = await session.execute(text("""
+            SELECT DISTINCT
+                w.township_name,
+                w.village_name,
+                w.group_name,
+                w.cbfbm,
+                w.cbfmc,
+                COALESCE(c.cbfzjhm, '') as cbfzjhm
+            FROM waiye_samples w
+            LEFT JOIN cbf c ON w.cbfbm::text = c.cbfbm::text
+            WHERE w.township_name = :name
+            ORDER BY w.village_name, w.group_name, w.cbfbm
+        """), {"name": req.township_name})
+        cbf_detail_rows = [dict(zip(r_cbf_detail.keys(), r)) for r in r_cbf_detail.fetchall()]
+        url = await asyncio.to_thread(export_sample_detail_excel, req.township_name, cbf_detail_rows)
+        return {"code": 200, "url": url}
+
+@app.get("/api/export_village_sample_stats")
+@app.post("/api/export_village_sample_stats")
+async def api_export_village_sample_stats():
+    """实时重新统计并导出全县各行政村抽样比例统计表 (.xlsx)"""
+    from generate_village_sample_stats import query_village_sample_stats, build_excel
+    village_data = await query_village_sample_stats()
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    root_path = os.path.abspath(os.path.join(base_dir, "..", "全椒县各行政村抽样比例统计表.xlsx"))
+    download_path = os.path.abspath(os.path.join(base_dir, "downloads", "全椒县各行政村抽样比例统计表.xlsx"))
+    await asyncio.to_thread(build_excel, village_data, [root_path, download_path])
+    return {
+        "code": 200, 
+        "message": "各行政村抽样比例统计表生成成功",
+        "url": "/api/download?file=downloads/全椒县各行政村抽样比例统计表.xlsx"
+    }
 
 @app.get("/api/export_rectify_att12")
 async def api_export_rectify_att12(township_name: str = ""):
@@ -1709,49 +2484,149 @@ async def save_special_deductions(req: SpecialDeductionsRequest):
 
 # ================= 认证 & 用户管理 API =================
 
+import io
+import base64
+import random
+from PIL import Image, ImageDraw, ImageFont
+
+# 本地验证码临时存储字典: captcha_id -> (code_lower, expire_timestamp)
+captcha_store = {}
+
+def create_local_captcha():
+    """纯本地生成高清晰防刷图形验证码，0 外部网络依赖"""
+    # 排除易混淆字符 0, O, o, 1, I, l
+    chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
+    code = ''.join(random.choices(chars, k=4))
+    width, height = 124, 40
+    img = Image.new('RGB', (width, height), color=(244, 246, 249))
+    draw = ImageDraw.Draw(img)
+
+    # 尝试加载清晰粗体英文字体，自适应降级
+    try:
+        font_path = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "arialbd.ttf")
+        if not os.path.exists(font_path):
+            font_path = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "arial.ttf")
+        font = ImageFont.truetype(font_path, 26)
+    except Exception:
+        font = ImageFont.load_default()
+
+    # 绘制轻度平滑干扰线条
+    for _ in range(4):
+        x1, y1 = random.randint(0, width), random.randint(0, height)
+        x2, y2 = random.randint(0, width), random.randint(0, height)
+        draw.line((x1, y1, x2, y2), fill=(random.randint(180, 220), random.randint(180, 220), random.randint(190, 230)), width=1)
+
+    # 绘制轻量噪点
+    for _ in range(35):
+        xy = (random.randint(0, width), random.randint(0, height))
+        draw.point(xy, fill=(random.randint(130, 190), random.randint(130, 190), random.randint(150, 210)))
+
+    # 逐字绘制，轻度位置扰动
+    for i, char in enumerate(code):
+        x = 12 + i * 26 + random.randint(-2, 2)
+        y = random.randint(4, 9)
+        char_color = (random.randint(25, 90), random.randint(40, 110), random.randint(120, 200))
+        draw.text((x, y), char, font=font, fill=char_color)
+
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    b64_image = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('utf-8')
+    return code, b64_image
+
+@app.get("/api/auth/captcha")
+async def api_get_captcha():
+    """获取纯本地生成的图形验证码"""
+    now = time.time()
+    # 定期清理过期的验证码缓存（超过 5 分钟）
+    expired_keys = [k for k, v in captcha_store.items() if v[1] < now]
+    for k in expired_keys:
+        captcha_store.pop(k, None)
+
+    code, b64_img = create_local_captcha()
+    captcha_id = uuid.uuid4().hex
+    # 验证码有效期 5 分钟
+    captcha_store[captcha_id] = (code.lower(), now + 300)
+    return {
+        "code": 200,
+        "captcha_id": captcha_id,
+        "image": b64_img
+    }
+
 class LoginRequest(BaseModel):
     username: str
     password: str
-    turnstile_token: Optional[str] = None
-
-async def verify_turnstile_token(token: str, remote_ip: str = None) -> bool:
-    """验证 Cloudflare Turnstile token"""
-    if not token:
-        return False
-    cfg = load_config()
-    secret_key = cfg.get("turnstile_secret_key", "0x4AAAAAABAhK4VmHHYq4mV3j4lAqm4vOtA")
-    url = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-    data = {
-        "secret": secret_key,
-        "response": token
-    }
-    if remote_ip:
-        data["remoteip"] = remote_ip
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, data=data)
-            result = resp.json()
-            return bool(result.get("success", False))
-    except Exception as e:
-        print(f"Cloudflare Turnstile 验证请求失败: {e}")
-        # 如果由于网络环境（如内网无法访问 Cloudflare 外网），记录日志并返回 False
-        return False
+    captcha_id: Optional[str] = ""
+    captcha_code: Optional[str] = ""
 
 @app.post("/api/auth/login")
-async def api_login(req: LoginRequest):
-    # 验证 Cloudflare Turnstile 人机验证码
-    is_valid_turnstile = await verify_turnstile_token(req.turnstile_token)
-    if not is_valid_turnstile:
-        return {"code": 400, "message": "人机安全验证失败，请刷新重试"}
+async def api_login(req: LoginRequest, request: Request = None):
+    # 1. 纯本地校验图形验证码
+    clean_id = (req.captcha_id or "").strip()
+    clean_code = (req.captcha_code or "").strip().lower()
 
-    token, err = await auth_module.login(req.username, req.password)
+    if not clean_id or clean_id not in captcha_store:
+        return {"code": 400, "message": "验证码已过期，请点击图片刷新重试"}
+    
+    correct_code, expire_at = captcha_store.pop(clean_id, (None, 0))
+    if time.time() > expire_at:
+        return {"code": 400, "message": "验证码已过期，请重新输入"}
+    
+    if clean_code != correct_code:
+        return {"code": 400, "message": "验证码错误，请重新输入"}
+
+    # 2. 账号密码登录
+    token, err, user_db = await auth_module.login(req.username, req.password)
     if err:
         return {"code": 401, "message": err}
     perms = await auth_module.get_perms(req.username)
     payload = auth_module._verify_token(token)
+    
+    # 动态获取用户绑定数据库的县域名称
+    county_info, _ = get_county_and_townships_sync(db_name=user_db)
+    county_name = county_info.get("name", user_db)
+    
+    # 记录登录审计
+    record_check_audit(
+        module_type="用户认证",
+        action_type="账号登录成功",
+        target_desc=f"登录系统工作台 (数据库: {user_db} - {county_name})",
+        details=f"角色: {payload.get('role', 'user')}, 分配数据库: {user_db}",
+        request=request,
+        username=req.username
+    )
+    
     return {"code": 200, "token": token, "username": req.username,
-            "role": payload.get("role","user"), "perms": perms}
+            "role": payload.get("role","user"), 
+            "target_db": user_db,
+            "county_name": county_name,
+            "perms": perms}
+
+@app.get("/api/auth/check")
+async def api_check_auth(request: Request):
+    """
+    检查当前 Token 的有效性（包括签名、未过期、以及密码未被修改）。
+    若密码已被修改，Token 中的 pwd_ver 与数据库不一致，直接返回 401。
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="未登录或缺少身份凭证")
+    token = auth_header.split(" ", 1)[1].strip()
+    payload = await auth_module.verify_token_active(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="登录凭证已失效或密码已被修改，请重新登录")
+    perms = await auth_module.get_perms(payload.get("sub", ""))
+    user_db = payload.get("target_db") or current_db_ctx.get()
+    county_info, _ = get_county_and_townships_sync(db_name=user_db)
+    county_name = county_info.get("name", user_db)
+    return {
+        "code": 200,
+        "valid": True,
+        "username": payload.get("sub"),
+        "role": payload.get("role", "user"),
+        "target_db": user_db,
+        "county_name": county_name,
+        "perms": perms
+    }
 
 class ChangePasswordRequest(BaseModel):
     username: str
@@ -1766,9 +2641,15 @@ class CreateUserRequest(BaseModel):
     username: str
     role: str = "user"
     password: str = "123456"
+    target_db: Optional[str] = ""
 
 class BatchCreateRequest(BaseModel):
     usernames: List[str]
+    target_db: Optional[str] = ""
+
+class SetUserDbRequest(BaseModel):
+    username: str
+    target_db: str
 
 class SetPermsRequest(BaseModel):
     username: str
@@ -1786,6 +2667,11 @@ async def api_set_perms(req: SetPermsRequest):
     await auth_module.set_perms(req.username, req.perms)
     return {"code": 200}
 
+@app.post("/api/auth/set_user_db")
+async def api_set_user_db(req: SetUserDbRequest):
+    await auth_module.set_user_target_db(req.username, req.target_db)
+    return {"code": 200, "message": "工作数据库分配成功"}
+
 @app.get("/api/auth/users")
 async def api_list_users():
     users = await auth_module.list_users()
@@ -1793,28 +2679,50 @@ async def api_list_users():
 
 @app.post("/api/auth/create_user")
 async def api_create_user(req: CreateUserRequest):
-    ok, err = await auth_module.create_user(req.username, req.role, req.password)
-    if not ok:
-        return {"code": 400, "message": err}
-    return {"code": 200}
+    try:
+        cur_db = current_db_ctx.get() or load_config().get("db_name", "quanjiao")
+        target_db = (req.target_db or cur_db).strip()
+        ok, err = await auth_module.create_user(req.username, req.role, req.password, target_db)
+        if not ok:
+            return {"code": 400, "message": err}
+        return {"code": 200, "target_db": target_db}
+    except Exception as e:
+        print(f"api_create_user error: {e}")
+        return {"code": 400, "message": f"创建账号失败: {str(e)}"}
 
 @app.post("/api/auth/batch_create")
 async def api_batch_create(req: BatchCreateRequest):
-    results = []
-    for uname in req.usernames:
-        uname = uname.strip()
-        if not uname:
-            continue
-        ok, err = await auth_module.create_user(uname)
-        results.append({"username": uname, "ok": ok, "err": err or ""})
-    return {"code": 200, "results": results}
+    try:
+        cur_db = current_db_ctx.get() or load_config().get("db_name", "quanjiao")
+        target_db = (req.target_db or cur_db).strip()
+        results = []
+        for uname in req.usernames:
+            uname = uname.strip()
+            if not uname:
+                continue
+            ok, err = await auth_module.create_user(uname, target_db=target_db)
+            results.append({"username": uname, "ok": ok, "err": err or ""})
+        return {"code": 200, "results": results, "target_db": target_db}
+    except Exception as e:
+        print(f"api_batch_create error: {e}")
+        return {"code": 400, "message": f"批量创建失败: {str(e)}"}
 
 @app.post("/api/auth/delete_user")
-async def api_delete_user(req: CreateUserRequest):
-    ok, err = await auth_module.delete_user(req.username)
+async def api_delete_user(req: CreateUserRequest, request: Request = None):
+    clean_u = (req.username or "").strip()
+    ok, err = await auth_module.delete_user(clean_u)
     if not ok:
         return {"code": 400, "message": err}
-    return {"code": 200}
+    
+    # 记录删除账号审计
+    record_check_audit(
+        module_type="用户认证",
+        action_type="删除系统账号",
+        target_desc=f"账号: {clean_u}",
+        details=f"成功从 sys_users 及 sys_permissions 中永久级联删除账号 [{clean_u}]",
+        request=request
+    )
+    return {"code": 200, "message": f"账号 {clean_u} 已成功删除"}
 
 @app.post("/api/auth/reset_password")
 async def api_reset_password(req: ResetPasswordRequest):
@@ -1842,6 +2750,26 @@ async def api_user_perms_all():
 os.makedirs(os.path.join(os.path.dirname(__file__), "uploads"), exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "uploads")), name="uploads")
 
+def _process_and_save_image(content: bytes, target_path: str):
+    """在后台独立线程中处理图像，避免阻塞主事件循环"""
+    try:
+        img = Image.open(io.BytesIO(content))
+        img = ImageOps.exif_transpose(img) # 纠正手机拍照旋转角度
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        
+        # 长边超过 1920 时按比例等比缩放
+        max_size = 1920
+        if max(img.size) > max_size:
+            img.thumbnail((max_size, max_size), Image.Resampling.BILINEAR)
+        
+        # 保存 JPEG，去掉极耗 CPU 的 optimize=True，兼顾质量与极致保存速度
+        img.save(target_path, "JPEG", quality=82)
+    except Exception:
+        # 如非标准图像格式直接保存原二进制
+        with open(target_path, "wb") as f:
+            f.write(content)
+
 @app.post("/api/upload_evidence")
 async def api_upload_evidence(file: UploadFile = File(...)):
     try:
@@ -1849,23 +2777,8 @@ async def api_upload_evidence(file: UploadFile = File(...)):
         filename = f"{uuid.uuid4().hex}.jpg"
         target_path = os.path.join(os.path.dirname(__file__), "uploads", filename)
         
-        # 自动压缩与修正方向（针对手机高清拍照，限制长边最大1920px，质量85%）
-        try:
-            img = Image.open(io.BytesIO(content))
-            img = ImageOps.exif_transpose(img) # 纠正手机拍照旋转角度
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-            
-            # 长边超过 1920 时按比例等比缩放
-            max_size = 1920
-            if max(img.size) > max_size:
-                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-            
-            img.save(target_path, "JPEG", quality=85, optimize=True)
-        except Exception:
-            # 如非标准图像格式直接保存原二进制
-            with open(target_path, "wb") as f:
-                f.write(content)
+        # 移入异步工作线程池执行图像解码、旋转与写入，消除主线程卡顿
+        await asyncio.to_thread(_process_and_save_image, content, target_path)
                 
         return {"code": 200, "url": f"/uploads/{filename}", "filename": filename}
     except Exception as e:
@@ -1891,12 +2804,127 @@ async def api_delete_evidence(req: DeleteEvidenceRequest):
 
 # ================= 询问笔录 (现场问询) =================
 
+class VillagePhotosSaveRequest(BaseModel):
+    village_code: str
+    township_name: Optional[str] = ""
+    village_name: Optional[str] = ""
+    photos: List[str] = []
+
+@app.get("/api/waiye/village_photos")
+async def get_village_photos(village_code: str):
+    """获取指定行政村上传的现场会照片列表"""
+    clean_vcode = str(village_code or "").strip()
+    if not clean_vcode:
+        return {"code": 400, "message": "村级代码不能为空"}
+    v_target = f"VILLAGE_{clean_vcode}"
+
+    async with SessionLocal() as session:
+        res = await session.execute(
+            text("SELECT form_data, township_name, village_name FROM waiye_inquiries WHERE cbfbm = :t LIMIT 1"),
+            {"t": v_target}
+        )
+        row = res.fetchone()
+        if row and row[0]:
+            fd = row[0]
+            photos = fd.get("photos") or []
+            return {
+                "code": 200, 
+                "photos": photos,
+                "township_name": row[1] or "",
+                "village_name": row[2] or ""
+            }
+        return {"code": 200, "photos": [], "township_name": "", "village_name": ""}
+
+@app.post("/api/waiye/village_photos")
+async def save_village_photos(req: VillagePhotosSaveRequest):
+    """保存或更新指定行政村的现场会核查照片列表"""
+    clean_vcode = str(req.village_code or "").strip()
+    if not clean_vcode:
+        return {"code": 400, "message": "村级代码不能为空"}
+    v_target = f"VILLAGE_{clean_vcode}"
+    
+    # 严格过滤有效服务器存储路径，杜绝临时 blob: 或 data: 等死链入库
+    clean_photos = []
+    for p in req.photos:
+        if not p or not isinstance(p, str):
+            continue
+        p_clean = p.strip()
+        if (p_clean.startswith("/uploads/") or "uploads/" in p_clean) and not p_clean.startswith("blob:") and not p_clean.startswith("data:"):
+            if p_clean not in clean_photos:
+                clean_photos.append(p_clean)
+
+    async with SessionLocal() as session:
+        res = await session.execute(
+            text("SELECT id, form_data FROM waiye_inquiries WHERE cbfbm = :t LIMIT 1"),
+            {"t": v_target}
+        )
+        row = res.fetchone()
+        if row:
+            fd = row[1] or {}
+            fd["photos"] = clean_photos
+            await session.execute(
+                text("UPDATE waiye_inquiries SET form_data = :fd, township_name = :tn, village_name = :vn, updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
+                {"fd": json.dumps(fd), "tn": req.township_name or "", "vn": req.village_name or "", "id": row[0]}
+            )
+        else:
+            fd = {"photos": clean_photos}
+            await session.execute(
+                text("""
+                    INSERT INTO waiye_inquiries (cbfbm, township_name, village_name, group_name, cbfmc, form_data)
+                    VALUES (:t, :tn, :vn, '行政村现场会', '行政村现场会', :fd)
+                """),
+                {"t": v_target, "tn": req.township_name or "", "vn": req.village_name or "", "fd": json.dumps(fd)}
+            )
+        await session.commit()
+    return {"code": 200, "message": "村级现场照片保存成功", "photos": clean_photos}
+
+class ExportVillagePhotosRequest(BaseModel):
+    village_code: Optional[str] = ""
+    township_name: Optional[str] = ""
+    village_name: Optional[str] = ""
+    photos: Optional[List[str]] = None
+
+@app.post("/api/export_village_meeting_photos")
+async def api_export_village_meeting_photos(req: ExportVillagePhotosRequest):
+    """导出指定行政村现场会照片文档 (.docx)"""
+    clean_vcode = str(req.village_code or "").strip()
+    t_name = (req.township_name or "").strip()
+    v_name = (req.village_name or "").strip()
+    photos = req.photos or []
+
+    async with SessionLocal() as session:
+        if clean_vcode and not photos:
+            v_target = f"VILLAGE_{clean_vcode}"
+            res = await session.execute(
+                text("SELECT form_data, township_name, village_name FROM waiye_inquiries WHERE cbfbm = :t LIMIT 1"),
+                {"t": v_target}
+            )
+            row = res.fetchone()
+            if row:
+                fd = row[0] or {}
+                photos = fd.get("photos") or []
+                if not t_name: t_name = row[1] or ""
+                if not v_name: v_name = row[2] or ""
+
+        # 如果没有传乡镇名和村名，尝试通过代码反查
+        if (not t_name or not v_name) and clean_vcode:
+            r_q = await session.execute(
+                text("SELECT qsdwdm, qsdwmc FROM qsdwdmb WHERE qsdwdm::text LIKE :code LIMIT 1"),
+                {"code": f"{clean_vcode[:12]}%"}
+            )
+            q_row = r_q.fetchone()
+            if q_row:
+                v_name = v_name or q_row[1]
+
+    url = await asyncio.to_thread(export_village_meeting_photos, t_name, v_name, photos)
+    return {"code": 200, "url": url}
+
 class InquirySaveRequest(BaseModel):
     cbfbm: str
-    township_name: str
-    village_name: str
-    group_name: str
-    cbfmc: str
+    township_name: Optional[str] = ""
+    village_name: Optional[str] = ""
+    group_name: Optional[str] = ""
+    cbfmc: Optional[str] = ""
     form_data: dict
 
 @app.get("/api/waiye/inquiry")
@@ -1917,7 +2945,8 @@ async def save_inquiry(req: InquirySaveRequest):
     from database import SessionLocal
     from sqlalchemy import text
     
-    for sign_key in ['bxwrqm', 'xwrqm', 'cmdbqm']:
+    # 仅保留被询问人签名与询问人签名（已取消村民代表签名）
+    for sign_key in ['bxwrqm', 'xwrqm']:
         sig_data = req.form_data.get(sign_key, '')
         if sig_data and sig_data.startswith('data:image'):
             try:
@@ -1930,9 +2959,62 @@ async def save_inquiry(req: InquirySaveRequest):
             except Exception as e:
                 print(f"Failed to save {sign_key}:", e)
 
+    # 严格清理 form_data 中的 photos 数组，防范 blob: 临时链接落库
+    if "photos" in req.form_data and isinstance(req.form_data["photos"], list):
+        clean_inq_photos = []
+        for p in req.form_data["photos"]:
+            if not p or not isinstance(p, str):
+                continue
+            p_clean = p.strip()
+            if (p_clean.startswith("/uploads/") or "uploads/" in p_clean) and not p_clean.startswith("blob:") and not p_clean.startswith("data:"):
+                if p_clean not in clean_inq_photos:
+                    clean_inq_photos.append(p_clean)
+        req.form_data["photos"] = clean_inq_photos
+
+    # 若前端未传区划信息，从已有记录或承包方表反查补全
+    t_name = (req.township_name or "").strip()
+    v_name = (req.village_name or "").strip()
+    g_name = (req.group_name or "").strip()
+    cbfmc  = (req.cbfmc or "").strip()
+
     async with SessionLocal() as session:
-        res = await session.execute(text("SELECT id FROM waiye_inquiries WHERE cbfbm = :cbfbm LIMIT 1"), {"cbfbm": req.cbfbm})
+        res = await session.execute(text("SELECT id, township_name, village_name, group_name, cbfmc FROM waiye_inquiries WHERE cbfbm = :cbfbm LIMIT 1"), {"cbfbm": req.cbfbm})
         row = res.fetchone()
+
+        # 若区划信息缺失，先从已有记录补，再从承包方表补
+        if not t_name and row and row[1]:
+            t_name = row[1]
+        if not v_name and row and row[2]:
+            v_name = row[2]
+        if not g_name and row and row[3]:
+            g_name = row[3]
+        if not cbfmc and row and row[4]:
+            cbfmc = row[4]
+        if not (t_name and v_name and g_name and cbfmc):
+            try:
+                # 1. 优先从 waiye_samples 补全
+                sample_res = await session.execute(
+                    text("SELECT township_name, village_name, group_name, cbfmc FROM waiye_samples WHERE cbfbm = :cbfbm LIMIT 1"),
+                    {"cbfbm": req.cbfbm}
+                )
+                sample_row = sample_res.fetchone()
+                if sample_row:
+                    if not t_name: t_name = sample_row[0] or ""
+                    if not v_name: v_name = sample_row[1] or ""
+                    if not g_name: g_name = sample_row[2] or ""
+                    if not cbfmc:  cbfmc  = sample_row[3] or ""
+                # 2. 若承包方名称仍为空，从 cbf 表补全
+                if not cbfmc:
+                    cbf_res = await session.execute(
+                        text("SELECT cbfmc FROM cbf WHERE cbfbm = :cbfbm LIMIT 1"),
+                        {"cbfbm": req.cbfbm}
+                    )
+                    cbf_row = cbf_res.fetchone()
+                    if cbf_row and cbf_row[0]:
+                        cbfmc = cbf_row[0]
+            except Exception as ex:
+                print("Fallback info lookup error:", ex)
+
         if row:
             await session.execute(text("""
                 UPDATE waiye_inquiries 
@@ -1943,7 +3025,7 @@ async def save_inquiry(req: InquirySaveRequest):
             await session.execute(text("""
                 INSERT INTO waiye_inquiries (cbfbm, township_name, village_name, group_name, cbfmc, form_data)
                 VALUES (:cbfbm, :t, :v, :g, :m, :form_data)
-            """), {"cbfbm": req.cbfbm, "t": req.township_name, "v": req.village_name, "g": req.group_name, "m": req.cbfmc, "form_data": json.dumps(req.form_data)})
+            """), {"cbfbm": req.cbfbm, "t": t_name, "v": v_name, "g": g_name, "m": cbfmc, "form_data": json.dumps(req.form_data)})
         await session.commit()
     return {"code": 200, "message": "保存成功"}
 
@@ -1970,6 +3052,8 @@ async def upload_inquiry_scan(cbfbm: str = Form(...), cbfmc: str = Form(""), fil
 
 class ExportInquiryRequest(BaseModel):
     cbfbm: str
+    form_data: Optional[dict] = None
+    photos: Optional[List[str]] = None
 
 @app.post("/api/export_waiye_inquiry")
 async def api_export_waiye_inquiry(req: ExportInquiryRequest):
@@ -1978,7 +3062,7 @@ async def api_export_waiye_inquiry(req: ExportInquiryRequest):
     async with SessionLocal() as session:
         res = await session.execute(text("SELECT * FROM waiye_inquiries WHERE cbfbm = :cbfbm"), {"cbfbm": req.cbfbm})
         row = res.fetchone()
-        if not row:
+        if not row and not req.form_data:
             return {"code": 404, "message": "没有找到该农户的问询记录"}
             
         r_cbf = await session.execute(text("SELECT cbfzjhm, lxdh FROM cbf WHERE cbfbm = :cbfbm"), {"cbfbm": req.cbfbm})
@@ -1999,22 +3083,27 @@ async def api_export_waiye_inquiry(req: ExportInquiryRequest):
         # 获取实际承包方名称
         r_samp = await session.execute(text("SELECT cbfmc FROM waiye_samples WHERE cbfbm = :cbfbm LIMIT 1"), {"cbfbm": req.cbfbm})
         samp_row = r_samp.fetchone()
-        real_cbfmc = samp_row[0] if (samp_row and samp_row[0]) else (row[5] or "")
+        real_cbfmc = samp_row[0] if (samp_row and samp_row[0]) else ((row[5] if row else "") or "")
         
-        fd = row[6] or {}
+        fd = req.form_data or (row[6] if row else {}) or {}
         bxwr_name = fd.get("bxwr") or fd.get("cbfmc") or real_cbfmc
+        
+        # 提取照片（优先使用传入的现场照片列表，双重兜底）
+        photos = req.photos or fd.get("photos") or []
+        
         data = {
             "cbfbm": req.cbfbm,
             "cbfmc": real_cbfmc,
             "bxwr": bxwr_name,
-            "township_name": row[2] or "",
-            "village_name": row[3] or "",
-            "group_name": row[4] or "",
+            "township_name": (row[2] if row else "") or fd.get("township_name", ""),
+            "village_name": (row[3] if row else "") or fd.get("village_name", ""),
+            "group_name": (row[4] if row else "") or fd.get("group_name", ""),
             "lxdh": fd.get("lxdh", lxdh),
             "gender": fd.get("gender", gender),
             "dk_cnt": dk_cnt,
             "scmj": ht_mj,
-            "form_data": fd
+            "form_data": fd,
+            "photos": photos
         }
     from doc_exporter import export_waiye_inquiry
     url = await asyncio.to_thread(export_waiye_inquiry, data)
