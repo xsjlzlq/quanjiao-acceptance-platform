@@ -147,9 +147,8 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                             v_data = await query_village_sample_stats()
                             v_excel_name = f"{county_name}各行政村抽样比例统计表.xlsx"
                             v_excel_down = os.path.join(downloads_dir, v_excel_name)
-                            v_excel_root = os.path.join(base_dir, v_excel_name)
                             v_excel_pkg = os.path.join(sample_dir, v_excel_name)
-                            await asyncio.to_thread(build_excel, v_data, [v_excel_down, v_excel_root, v_excel_pkg])
+                            await asyncio.to_thread(build_excel, v_data, [v_excel_down, v_excel_pkg], county_name=county_name)
                         except Exception as e_v_excel:
                             print(f"Failed to generate village sample stats excel in batch export: {e_v_excel}")
 
@@ -164,9 +163,9 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                     row = r1.fetchone()
                     form_data = row[0] if (row and row[0]) else {}
                     await asyncio.to_thread(export_neiye_att6_county, form_data)
-                    src = os.path.join(downloads_dir, f"附件6_{county_name}县级自查内业组检查记录表（1_4）.doc")
+                    src = os.path.join(downloads_dir, f"附件6_{county_name}县级自查内业组检查记录表（1_4、4_4）.doc")
                     if os.path.exists(src):
-                        shutil.copy(src, os.path.join(neiye_dir, f"附件6_{county_name}县级自查内业组检查记录表（1_4）.doc"))
+                        shutil.copy(src, os.path.join(neiye_dir, f"附件6_{county_name}县级自查内业组检查记录表（1_4、4_4）.doc"))
                 
                 if "att7" in attachments:
                     if task_id:
@@ -216,8 +215,8 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                 # 3. 验收评定资料
                 score_dir = os.path.join(export_path, "3.验收评定资料")
                 os.makedirs(score_dir, exist_ok=True)
+                scores, c_mech, has_county, c_eff = await get_all_township_scores(session)
                 
-                scores, c_mech, has_county = await get_all_township_scores(session)
                 if "att10" in attachments:
                     if task_id:
                         update_export_task(task_id, 75, f"正在生成 附件10 {county_name}县级自查得分汇总表...")
@@ -239,7 +238,7 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                         special2 = s_fd.get("special2", False)
                         special3 = s_fd.get("special3", 0.0)
                         
-                    county_avg = calculate_county_averages(scores, c_mech, has_county)
+                    county_avg = calculate_county_averages(scores, c_mech, has_county, c_eff)
                     deduct = (0.5 if special1 else 0.0) + (1.0 if special2 else 0.0) + special3
                     final_score = county_avg["mech"] + county_avg["prog_nei"] + county_avg["policy"] + county_avg["effect_nei"] + county_avg["prog_wai"] + county_avg["effect_wai"] - deduct
                     final_score = max(round(final_score, 1), 0.0)
@@ -248,6 +247,19 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                     src = os.path.join(downloads_dir, f"附件11_{county_name}县级自查验收评定表.doc")
                     if os.path.exists(src):
                         shutil.copy(src, os.path.join(score_dir, f"附件11_{county_name}县级自查验收评定表.doc"))
+
+                    # 全县问题反馈记录表汇总 (.doc)
+                    try:
+                        from doc_exporter import export_county_issue_feedback_summary
+                        feedback_url = await asyncio.to_thread(export_county_issue_feedback_summary, county_name)
+                        if feedback_url and "file=" in feedback_url:
+                            rel_fb = feedback_url.split("file=")[-1]
+                            fb_name = os.path.basename(rel_fb)
+                            src_fb = os.path.join(downloads_dir, fb_name)
+                            if os.path.exists(src_fb):
+                                shutil.copy(src_fb, os.path.join(score_dir, fb_name))
+                    except Exception as e_fb:
+                        print("Batch export county feedback summary error:", e_fb)
                         
             elif level == "township":
                 clean_ts = sanitize_filename(township_name)
@@ -339,16 +351,16 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                 neiye_dir = os.path.join(export_path, "2.内业核查")
                 os.makedirs(neiye_dir, exist_ok=True)
                 if "att6_township" in attachments:
-                    # 2.1 导出乡镇本级附件6（同县级仅导出机制运行 1/4，映射为 XX县XX镇）
+                    # 2.1 导出乡镇本级附件6（机制运行 1/4 与工作成效 4/4，映射为 XX县XX镇）
                     if task_id:
-                        update_export_task(task_id, 30, f"正在生成 附件6 检查记录表 ({township_name} 乡镇机制运行 1/4)...")
+                        update_export_task(task_id, 30, f"正在生成 附件6 检查记录表 ({township_name} 乡镇机制运行与工作成效)...")
                     r_ts = await session.execute(text("SELECT form_data FROM neiye_records WHERE qsdwdm = :code"), {"code": township_code})
                     row_ts = r_ts.fetchone()
                     fd_ts = row_ts[0] if (row_ts and row_ts[0]) else {}
                     await asyncio.to_thread(export_neiye_att6_mechanism_only, fd_ts, False, township_name)
-                    src_ts = os.path.join(downloads_dir, f"附件6_{county_name}县级自查内业组检查记录表_{clean_ts}（1_4）.doc")
+                    src_ts = os.path.join(downloads_dir, f"附件6_{county_name}县级自查内业组检查记录表_{clean_ts}（1_4、4_4）.doc")
                     if os.path.exists(src_ts):
-                        shutil.copy(src_ts, os.path.join(neiye_dir, f"附件6_{county_name}县级自查内业组检查记录表_{clean_ts}（1_4）.doc"))
+                        shutil.copy(src_ts, os.path.join(neiye_dir, f"附件6_{county_name}县级自查内业组检查记录表_{clean_ts}（1_4、4_4）.doc"))
 
                     # 2.2 导出该镇下所有抽样村的附件6检查记录表（映射为 XX县XX镇XX村）
                     r_villages = await session.execute(text("""
@@ -478,18 +490,32 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                             cur_pct = 90 + int(3 * pv_i / max(total_pv, 1))
                             update_export_task(task_id, cur_pct, f"正在生成现场会照片文档 ({township_name} - {p_vn}, {pv_i}/{total_pv})...")
 
-                        # 从 waiye_inquiries 获取村级现场会照片
+                        # 从 waiye_inquiries 获取村级现场会照片及更新时间
                         v_target = f"VILLAGE_{str(p_vc).strip()}"
                         rv_photo = await session.execute(
-                            text("SELECT form_data FROM waiye_inquiries WHERE cbfbm = :t LIMIT 1"),
+                            text("SELECT form_data, updated_at FROM waiye_inquiries WHERE cbfbm = :t LIMIT 1"),
                             {"t": v_target}
                         )
                         r_row = rv_photo.fetchone()
                         v_photos = []
-                        if r_row and r_row[0]:
-                            v_photos = r_row[0].get("photos") or []
+                        v_updated_at = None
+                        if r_row:
+                            if r_row[0]:
+                                v_photos = r_row[0].get("photos") or []
+                            v_updated_at = r_row[1]
 
-                        doc_url = await asyncio.to_thread(export_village_meeting_photos, township_name, p_vn, v_photos)
+                        # 获取该村已完成问询的承包方代表姓名
+                        rv_int = await session.execute(
+                            text("""
+                                SELECT DISTINCT cbfmc FROM waiye_inquiries
+                                WHERE township_name = :tn AND village_name = :vn AND cbfbm NOT LIKE 'VILLAGE_%'
+                                ORDER BY cbfmc
+                            """),
+                            {"tn": township_name, "vn": p_vn}
+                        )
+                        v_interviewees = [r[0] for r in rv_int.fetchall() if r[0] and r[0] != '行政村现场会']
+
+                        doc_url = await asyncio.to_thread(export_village_meeting_photos, township_name, p_vn, v_photos, v_interviewees, v_updated_at)
                         if doc_url and "file=" in doc_url:
                             rel_doc = doc_url.split("file=")[-1]
                             doc_name = os.path.basename(rel_doc)

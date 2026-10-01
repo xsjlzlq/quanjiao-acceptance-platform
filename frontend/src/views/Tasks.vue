@@ -217,7 +217,19 @@
           <van-field v-model="sVillageName" is-link readonly label="村级" placeholder="请选择" @click="showVp = true" :disabled="!sTownshipCode" />
           <van-popup v-model:show="showVp" round position="bottom"><van-picker :columns="vpCols" @cancel="showVp = false" @confirm="onConfirmVp" /></van-popup>
 
-          <van-field v-model="sGroupName" is-link readonly label="村组" placeholder="请选择" @click="showGp = true" :disabled="!sVillageCode" />
+          <van-field 
+            :model-value="sGroupCode ? sGroupName : (sVillageCode ? '未选择（整村全部抽样）' : '')" 
+            is-link 
+            readonly 
+            label="村组" 
+            placeholder="请选择（未选择为整村全部抽样）" 
+            @click="showGp = true" 
+            :disabled="!sVillageCode"
+          >
+            <template #right-icon v-if="sGroupCode">
+              <van-icon name="clear" color="#969799" @click.stop="clearGroupSelection" />
+            </template>
+          </van-field>
           <van-popup v-model:show="showGp" round position="bottom"><van-picker :columns="gpCols" @cancel="showGp = false" @confirm="onConfirmGp" /></van-popup>
 
           <template v-if="sGroupCode">
@@ -267,6 +279,47 @@
               :disabled="remainingCbfCount === 0"
               :placeholder="remainingCbfCount === 0 ? '已全部抽样' : `留空默认抽样，最多可抽 ${remainingCbfCount} 户`"
             />
+          </template>
+
+          <!-- 未选择组级时显示整村全部抽样概况 -->
+          <template v-else-if="sVillageCode">
+            <van-cell title="抽样模式">
+              <template #value>
+                <van-tag type="warning" size="medium">整村全部抽样</van-tag>
+              </template>
+            </van-cell>
+
+            <van-cell center title="是否100%全额抽样" label="开启后该村下辖每个小组均按100%抽取全部农户">
+              <template #right-icon>
+                <van-switch v-model="villageFullSample" size="20" />
+              </template>
+            </van-cell>
+
+            <van-cell title="下辖村民组数" :value="villageGroupCount + ' 个组'" />
+            <van-cell title="全村总农户数" :value="cbfCount + ' 户'" />
+            <van-cell title="全村已抽农户数">
+              <template #value>
+                <van-tag :type="sampledCbfCount > 0 ? 'success' : 'default'" size="medium">
+                  {{ sampledCbfCount }} 户
+                </van-tag>
+              </template>
+            </van-cell>
+            <van-cell title="全村剩余可抽" :value="remainingCbfCount + ' 户'">
+              <template #value>
+                <van-tag :type="remainingCbfCount === 0 ? 'danger' : 'primary'" size="medium">
+                  {{ remainingCbfCount }} 户
+                </van-tag>
+              </template>
+            </van-cell>
+
+            <div v-if="villageFullSample" style="padding: 6px 16px; font-size: 12px; color: #ed6a0c; background: #fffbe8; line-height: 1.5;">
+              <van-icon name="warning-o" style="margin-right: 4px;" />
+              已开启【100%全额抽样】模式：系统将对该行政村每个村民小组的全部承包方（共需抽满 {{ cbfCount }} 户，本次将补抽全部剩余 {{ remainingCbfCount }} 户）进行 100% 顶格全抽！
+            </div>
+            <div v-else style="padding: 6px 16px; font-size: 12px; color: #1989fa; background: #eef5fe; line-height: 1.5;">
+              <van-icon name="info-o" style="margin-right: 4px;" />
+              未选择具体组级时为【整村全部抽样】。点击开始抽样后，系统将对【{{ sTownshipName }} {{ sVillageName }}】下辖全部 {{ villageGroupCount }} 个村民小组逐组执行抽样与增量补抽。
+            </div>
           </template>
         </van-cell-group>
 
@@ -582,6 +635,8 @@ const sVillageName = ref('');
 const sVillageCode = ref('');
 const sGroupName = ref('');
 const sGroupCode = ref('');
+const villageGroupCount = ref(0);
+const villageFullSample = ref(false);
 
 const showTownshipMultiSelect = ref(false);
 const selectedTownshipCodes = ref([]);
@@ -814,15 +869,42 @@ const onConfirmTp = (opt) => {
   showTp.value = false;
   sVillageName.value = ''; sVillageCode.value = '';
   sGroupName.value = ''; sGroupCode.value = '';
-  cbfCount.value = 0; sampledCbfCount.value = 0; remainingCbfCount.value = 0; manualCount.value = '';
+  cbfCount.value = 0; sampledCbfCount.value = 0; remainingCbfCount.value = 0; manualCount.value = ''; villageGroupCount.value = 0; villageFullSample.value = false;
 };
 
-const onConfirmVp = (opt) => {
+const onConfirmVp = async (opt) => {
   sVillageName.value = opt.selectedOptions[0].text;
   sVillageCode.value = opt.selectedOptions[0].value;
   showVp.value = false;
   sGroupName.value = ''; sGroupCode.value = '';
-  cbfCount.value = 0; sampledCbfCount.value = 0; remainingCbfCount.value = 0; manualCount.value = '';
+  cbfCount.value = 0; sampledCbfCount.value = 0; remainingCbfCount.value = 0; manualCount.value = ''; villageGroupCount.value = 0; villageFullSample.value = false;
+  // 未选择组时，先获取整村统计
+  await fetchVillageStats(sVillageCode.value);
+};
+
+const clearGroupSelection = async () => {
+  sGroupName.value = '';
+  sGroupCode.value = '';
+  manualCount.value = '';
+  villageFullSample.value = false;
+  if (sVillageCode.value) {
+    await fetchVillageStats(sVillageCode.value);
+  }
+};
+
+const fetchVillageStats = async (vCode) => {
+  if (!vCode) return;
+  try {
+    const res = await axios.get('/api/contractor_count?village_code=' + vCode);
+    if (res.data.code === 200) {
+      cbfCount.value = res.data.count || 0;
+      sampledCbfCount.value = res.data.sampled_count || 0;
+      remainingCbfCount.value = res.data.remaining_count || 0;
+      villageGroupCount.value = res.data.group_count || 0;
+    }
+  } catch (e) {
+    console.error('获取村级统计失败:', e);
+  }
 };
 
 const onConfirmGp = async (opt) => {
@@ -857,10 +939,38 @@ const downloadFile = (url) => {
 
 const generateSamples = async () => {
   if (mode.value === 1) {
-    if (!sGroupCode.value) { showToast('请先选择到村民组'); return; }
-    if (remainingCbfCount.value === 0) {
-      showToast('该组所有承包方已全部抽样，无法继续抽样！');
+    if (!sVillageCode.value) {
+      showToast('请先选择乡镇和行政村');
       return;
+    }
+    // 未选择具体组级时为整村全部抽样：弹窗提示是否整村全部抽样
+    if (!sGroupCode.value) {
+      if (remainingCbfCount.value === 0) {
+        showToast(`该行政村【${sVillageName.value}】所有农户已全部抽样，无法继续抽取！`);
+        return;
+      }
+      const confirmTitle = villageFullSample.value ? '整村100%全额抽样确认' : '整村全部抽样确认';
+      const confirmMessage = villageFullSample.value
+        ? `检测到您未选择具体村组，并开启了【100%全额抽样】：\n系统将对【${sTownshipName.value} ${sVillageName.value}】下辖全部 ${villageGroupCount.value} 个村民小组进行【100%全额抽样】（每个小组全部农户 100% 顶格全抽，本次将把全部剩余 ${remainingCbfCount.value} 户一次性全抽建档）。\n\n是否确认执行整村 100% 全额抽样？`
+        : `检测到您未选择具体村组，系统将对：\n【${sTownshipName.value} ${sVillageName.value}】下辖全部 ${villageGroupCount.value} 个村民小组进行【整村全部抽样】（按 5%~10% 标准规范抽样）。\n\n全村总户数 ${cbfCount.value} 户，剩余可抽 ${remainingCbfCount.value} 户。\n\n是否确认执行整村全部抽样？`;
+
+      try {
+        await showConfirmDialog({
+          title: confirmTitle,
+          message: confirmMessage,
+          confirmButtonText: villageFullSample.value ? '确认100%全抽' : '确认整村抽样',
+          cancelButtonText: '取消',
+          confirmButtonColor: '#1989fa',
+          messageAlign: 'left'
+        });
+      } catch {
+        return; // 用户点击了“取消”
+      }
+    } else {
+      if (remainingCbfCount.value === 0) {
+        showToast('该组所有承包方已全部抽样，无法继续抽样！');
+        return;
+      }
     }
   }
   if (mode.value === 2 && selectedTownshipCodes.value.length === 0) { showToast('请至少选择一个抽样乡镇'); return; }
@@ -969,18 +1079,23 @@ const generateSamples = async () => {
       group_name: sGroupName.value,
       manual_sample_count: manualCount.value ? parseInt(manualCount.value) : null,
       township_codes: mode.value === 2 ? selectedTownshipCodes.value : null,
-      township_names: mode.value === 2 ? selectedTownshipNames.value : null
+      township_names: mode.value === 2 ? selectedTownshipNames.value : null,
+      is_full_sample: (mode.value === 1 && !sGroupCode.value) ? villageFullSample.value : false
     });
       if (res.data.code === 200) {
         showToast({ type: 'success', message: '抽样成功！抽样数据已保存至外业核查。' });
         await fetchProgressDashboard();
-        // 刷新当前选定组的已抽/剩余户数
-        if (mode.value === 1 && sGroupCode.value) {
-          const resCount = await axios.get('/api/contractor_count?group_code=' + sGroupCode.value);
-          cbfCount.value = resCount.data.count || 0;
-          sampledCbfCount.value = resCount.data.sampled_count || 0;
-          remainingCbfCount.value = resCount.data.remaining_count || 0;
-          manualCount.value = '';
+        // 刷新当前选定组或整村的已抽/剩余户数
+        if (mode.value === 1) {
+          if (sGroupCode.value) {
+            const resCount = await axios.get('/api/contractor_count?group_code=' + sGroupCode.value);
+            cbfCount.value = resCount.data.count || 0;
+            sampledCbfCount.value = resCount.data.sampled_count || 0;
+            remainingCbfCount.value = resCount.data.remaining_count || 0;
+            manualCount.value = '';
+          } else if (sVillageCode.value) {
+            await fetchVillageStats(sVillageCode.value);
+          }
         }
         files.value = res.data.urls.map(u => ({
           name: u.split('file=downloads/')[1],

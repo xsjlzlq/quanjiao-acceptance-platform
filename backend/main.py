@@ -10,7 +10,8 @@ from doc_exporter import (
     export_neiye_att6_township, export_neiye_att6_county, export_neiye_att7,
     export_neiye_att6_mechanism_only,
     export_rectify_att12, export_rectify_att13, sanitize_filename,
-    export_sample_detail_excel, export_village_meeting_photos
+    export_sample_detail_excel, export_village_meeting_photos,
+    export_county_issue_feedback_summary, export_issue_feedback_summary_by_level
 )
 # -*- coding: utf-8 -*-
 from fastapi import FastAPI, UploadFile, File, Form, Request
@@ -514,27 +515,61 @@ async def get_neiye_townships():
         }
 
 @app.get("/api/contractor_count")
-async def get_contractor_count(group_code: str):
-    clean_code = str(group_code or "").strip()
+async def get_contractor_count(group_code: Optional[str] = None, village_code: Optional[str] = None):
+    clean_gcode = str(group_code or "").strip()
+    clean_vcode = str(village_code or "").strip()
     async with SessionLocal() as session:
-        # 该发包方总承包方户数
-        sql_total = text("SELECT COUNT(*) FROM cbf WHERE cbfbm::text LIKE :code")
-        res_total = await session.execute(sql_total, {"code": f"{clean_code}%"})
-        total_count = res_total.scalar() or 0
+        if clean_gcode:
+            # 该发包方总承包方户数
+            sql_total = text("SELECT COUNT(*) FROM cbf WHERE cbfbm::text LIKE :code")
+            res_total = await session.execute(sql_total, {"code": f"{clean_gcode}%"})
+            total_count = res_total.scalar() or 0
 
-        # 该发包方已在 waiye_samples 中的去重承包方户数
-        sql_sampled = text("SELECT COUNT(DISTINCT cbfbm) FROM waiye_samples WHERE group_code = :code")
-        res_sampled = await session.execute(sql_sampled, {"code": clean_code})
-        sampled_count = res_sampled.scalar() or 0
+            # 该发包方已在 waiye_samples 中的去重承包方户数
+            sql_sampled = text("SELECT COUNT(DISTINCT cbfbm) FROM waiye_samples WHERE group_code = :code")
+            res_sampled = await session.execute(sql_sampled, {"code": clean_gcode})
+            sampled_count = res_sampled.scalar() or 0
 
-        remaining_count = max(total_count - sampled_count, 0)
+            remaining_count = max(total_count - sampled_count, 0)
 
-        return {
-            "code": 200, 
-            "count": total_count,
-            "sampled_count": sampled_count,
-            "remaining_count": remaining_count
-        }
+            return {
+                "code": 200, 
+                "count": total_count,
+                "sampled_count": sampled_count,
+                "remaining_count": remaining_count,
+                "is_village": False
+            }
+        elif clean_vcode:
+            v_prefix = clean_vcode[:12] if len(clean_vcode) >= 12 else clean_vcode
+            # 统计该行政村下辖村民组数量
+            r_g_cnt = await session.execute(
+                text("SELECT COUNT(*) FROM qsdwdmb WHERE qsdwdm::text LIKE :code AND LENGTH(qsdwdm::text) = 14 AND qsdwdm::text NOT LIKE '%00'"),
+                {"code": f"{v_prefix}%"}
+            )
+            group_count = r_g_cnt.scalar() or 0
+
+            # 全村总承包方户数
+            sql_total = text("SELECT COUNT(DISTINCT cbfbm) FROM cbf WHERE cbfbm::text LIKE :code")
+            res_total = await session.execute(sql_total, {"code": f"{v_prefix}%"})
+            total_count = res_total.scalar() or 0
+
+            # 全村已抽样户数
+            sql_sampled = text("SELECT COUNT(DISTINCT cbfbm) FROM waiye_samples WHERE SUBSTRING(group_code, 1, 12) = :vp")
+            res_sampled = await session.execute(sql_sampled, {"vp": v_prefix})
+            sampled_count = res_sampled.scalar() or 0
+
+            remaining_count = max(total_count - sampled_count, 0)
+
+            return {
+                "code": 200,
+                "count": total_count,
+                "sampled_count": sampled_count,
+                "remaining_count": remaining_count,
+                "group_count": group_count,
+                "is_village": True
+            }
+        else:
+            return {"code": 400, "message": "请提供村民小组编码或行政村编码"}
 
 class SampleRequest(BaseModel):
     mode: int
@@ -547,6 +582,7 @@ class SampleRequest(BaseModel):
     manual_sample_count: Optional[int] = None
     township_codes: Optional[list] = None
     township_names: Optional[list] = None
+    is_full_sample: Optional[bool] = False
 
 def calc_sample_size(total_cbf: int, manual_count: int = None) -> int:
     if manual_count is not None and manual_count > 0:
@@ -684,8 +720,33 @@ def check_group_sample_compliance(total_cbf: int, specified_count: Optional[int]
 async def do_sample(req: SampleRequest):
     async with SessionLocal() as session:
         sampled_groups = []
+        is_village_mode_1 = False
         if req.mode == 1:
-            sampled_groups.append({"code": req.group_code, "name": req.group_name, "v_name": req.village_name, "tz_name": req.township_name})
+            if req.group_code and str(req.group_code).strip():
+                sampled_groups.append({
+                    "code": req.group_code, 
+                    "name": req.group_name or "所选组", 
+                    "v_name": req.village_name, 
+                    "tz_name": req.township_name
+                })
+            elif req.village_code and str(req.village_code).strip():
+                # 未选择组级抽样时为整村全部抽样：查询该行政村下辖的所有村民小组
+                is_village_mode_1 = True
+                v_prefix = str(req.village_code).strip()[:12]
+                sql_g = text("SELECT qsdwdm, qsdwmc FROM qsdwdmb WHERE qsdwdm::text LIKE :code AND LENGTH(qsdwdm::text) = 14 AND qsdwdm::text NOT LIKE '%00' ORDER BY qsdwdm")
+                res_g = await session.execute(sql_g, {"code": f"{v_prefix}%"})
+                all_village_groups = res_g.fetchall()
+                if not all_village_groups:
+                    return {"code": 400, "message": f"未查询到行政村【{req.village_name}】下辖的村民小组"}
+                for g_row in all_village_groups:
+                    sampled_groups.append({
+                        "code": g_row[0],
+                        "name": g_row[1],
+                        "v_name": req.village_name,
+                        "tz_name": req.township_name
+                    })
+            else:
+                return {"code": 400, "message": "请选择需要抽样的行政村或村民小组"}
         elif req.mode == 2:
             tz_list = []
             if req.township_codes and len(req.township_codes) > 0:
@@ -744,16 +805,31 @@ async def do_sample(req: SampleRequest):
             total_cbf = len(cbfs)
             
             if req.mode == 1:
-                # Mode 1: 按村组手动抽样（支持增量补抽，绝不重复抽样已有农户，严禁删除历史外业记录）
+                # Mode 1: 按村组手动抽样（支持单组/整村全部抽样增量补抽，绝不重复抽样已有农户，严禁删除历史外业记录）
                 unselected_cbfs = [c for c in cbfs if str(c[0]) not in already_sampled_cbfs]
                 if not unselected_cbfs:
-                    return {
-                        "code": 400,
-                        "message": f"该村组所有承包方（共 {total_cbf} 户）已全部抽样，无法重复抽样！"
-                    }
+                    if not is_village_mode_1:
+                        return {
+                            "code": 400,
+                            "message": f"该村组所有承包方（共 {total_cbf} 户）已全部抽样，无法重复抽样！"
+                        }
+                    else:
+                        # 整村抽样时，若该组已抽满，登记该组统计数据并跳过
+                        stats.append({
+                            "序号": len(stats) + 1,
+                            "乡镇名称": tz_name,
+                            "村名称": g["v_name"], 
+                            "组名称": g["name"],
+                            "发包方总户数": total_cbf,
+                            "抽样农户数5%": len(already_sampled_cbfs)
+                        })
+                        continue
                 
                 # 计算待抽取数量
-                if req.manual_sample_count is not None and req.manual_sample_count > 0:
+                if is_village_mode_1 and req.is_full_sample:
+                    # 整村 100% 全额抽样：把当前组所有尚未被抽样的承包方全部抽入，达到组内100%全抽！
+                    needed_size = len(unselected_cbfs)
+                elif req.manual_sample_count is not None and req.manual_sample_count > 0:
                     needed_size = min(len(unselected_cbfs), req.manual_sample_count)
                 else:
                     target_total = calc_sample_size(total_cbf, None)
@@ -792,6 +868,9 @@ async def do_sample(req: SampleRequest):
                     groups_to_delete.append(g_code)
                     for c in sampled:
                         all_sampled_list.append((tz_name, g["v_name"], g["name"], g_code, c))
+
+        if req.mode == 1 and is_village_mode_1 and not all_sampled_list:
+            return {"code": 400, "message": f"该行政村【{req.village_name}】下辖各组所有承包方已全部完成抽样，无法继续抽取！"}
 
         if groups_to_delete:
             await session.execute(text("DELETE FROM waiye_samples WHERE group_code = ANY(:codes)"), {"codes": groups_to_delete})
@@ -1679,8 +1758,130 @@ async def get_waiye_group_samples(
                 "signature_url": sig_url,
                 "phone_correct": r[22] or ""
             })
-            
-        return {"code": 200, "data": data}
+
+        # 计算该组对应行政村的统计数据（总户数、已核查完户数、占比等）
+        village_stats = None
+        if rows:
+            v_prefix = str(rows[0][4])[:12] if (rows[0][4] and len(str(rows[0][4])) >= 12) else ""
+            if not v_prefix and group_code and len(group_code) >= 12:
+                v_prefix = group_code[:12]
+
+            if v_prefix:
+                r_tot = await session.execute(
+                    text("SELECT COUNT(DISTINCT cbfbm) FROM cbf WHERE cbfbm::text LIKE :code"),
+                    {"code": f"{v_prefix}%"}
+                )
+                total_village_cbf = r_tot.scalar() or 0
+
+                r_chk = await session.execute(
+                    text("""
+                        SELECT 
+                            COUNT(DISTINCT cbfbm) as sampled_cbf,
+                            COUNT(DISTINCT CASE WHEN signature_url IS NOT NULL AND signature_url != '' THEN cbfbm END) as signed_cbf
+                        FROM waiye_samples 
+                        WHERE SUBSTRING(group_code, 1, 12) = :vp
+                    """),
+                    {"vp": v_prefix}
+                )
+                # 抽样户数 vs 真正核查完并签字确认的户数
+                chk_row = r_chk.fetchone()
+                sampled_cbf = (chk_row[0] or 0) if chk_row else 0
+                signed_cbf = (chk_row[1] or 0) if chk_row else 0
+
+                # 核心定义：签名完成后才算真正核查完！
+                checked_cbf = signed_cbf
+                ratio_pct = round((checked_cbf / total_village_cbf * 100), 2) if total_village_cbf > 0 else 0.0
+                req_5pct = math.ceil(total_village_cbf * 0.05)
+                is_qualified = (checked_cbf >= req_5pct)
+                shortage = max(req_5pct - checked_cbf, 0)
+
+                village_stats = {
+                    "township_name": rows[0][1],
+                    "village_name": rows[0][2],
+                    "village_code": f"{v_prefix}00",
+                    "total_cbf_count": total_village_cbf, # 全村总户数
+                    "checked_cbf_count": checked_cbf,     # 已核查完户数（必须签名完成）
+                    "sampled_cbf_count": sampled_cbf,     # 计划抽检总户数
+                    "signed_cbf_count": signed_cbf,       # 已签名确认户数
+                    "ratio_pct": ratio_pct,               # 已核查完户数占全村总户数比例
+                    "required_5pct": req_5pct,            # 5% 门槛需核查户数
+                    "is_qualified": is_qualified,         # 5% 达标状态（需签完足额）
+                    "shortage": shortage                  # 距离 5% 还需核查签名户数
+                }
+
+        return {"code": 200, "data": data, "village_stats": village_stats}
+
+@app.get("/api/waiye/village_check_progress")
+async def get_village_check_progress(
+    group_code: Optional[str] = None,
+    village_code: Optional[str] = None
+):
+    """实时查询指定核查组对应的行政村总户数、已核查完户数及占比"""
+    clean_gc = str(group_code or "").strip()
+    clean_vc = str(village_code or "").strip()
+
+    v_prefix = ""
+    if clean_vc and len(clean_vc) >= 12:
+        v_prefix = clean_vc[:12]
+    elif clean_gc and len(clean_gc) >= 12:
+        v_prefix = clean_gc[:12]
+
+    if not v_prefix:
+        return {"code": 400, "message": "缺少有效的村民组编码或行政村编码"}
+
+    async with SessionLocal() as session:
+        r_name = await session.execute(
+            text("SELECT township_name, village_name FROM waiye_samples WHERE SUBSTRING(group_code, 1, 12) = :vp LIMIT 1"),
+            {"vp": v_prefix}
+        )
+        row_name = r_name.fetchone()
+        t_name = row_name[0] if row_name else ""
+        v_name = row_name[1] if row_name else ""
+
+        r_tot = await session.execute(
+            text("SELECT COUNT(DISTINCT cbfbm) FROM cbf WHERE cbfbm::text LIKE :code"),
+            {"code": f"{v_prefix}%"}
+        )
+        total_village_cbf = r_tot.scalar() or 0
+
+        r_chk = await session.execute(
+            text("""
+                SELECT 
+                    COUNT(DISTINCT cbfbm) as sampled_cbf,
+                    COUNT(DISTINCT CASE WHEN signature_url IS NOT NULL AND signature_url != '' THEN cbfbm END) as signed_cbf
+                FROM waiye_samples 
+                WHERE SUBSTRING(group_code, 1, 12) = :vp
+            """),
+            {"vp": v_prefix}
+        )
+        # 抽样户数 vs 真正核查完并签字确认的户数
+        chk_row = r_chk.fetchone()
+        sampled_cbf = (chk_row[0] or 0) if chk_row else 0
+        signed_cbf = (chk_row[1] or 0) if chk_row else 0
+
+        # 核心定义：签名完成后才算真正核查完！
+        checked_cbf = signed_cbf
+        ratio_pct = round((checked_cbf / total_village_cbf * 100), 2) if total_village_cbf > 0 else 0.0
+        req_5pct = math.ceil(total_village_cbf * 0.05)
+        is_qualified = (checked_cbf >= req_5pct)
+        shortage = max(req_5pct - checked_cbf, 0)
+
+        return {
+            "code": 200,
+            "data": {
+                "township_name": t_name,
+                "village_name": v_name,
+                "village_code": f"{v_prefix}00",
+                "total_cbf_count": total_village_cbf, # 全村总户数
+                "checked_cbf_count": checked_cbf,     # 已核查完户数（必须签名完成）
+                "sampled_cbf_count": sampled_cbf,     # 计划抽检总户数
+                "signed_cbf_count": signed_cbf,       # 已签名确认户数
+                "ratio_pct": ratio_pct,               # 已核查完户数占全村总户数比例
+                "required_5pct": req_5pct,            # 5% 门槛需核查户数
+                "is_qualified": is_qualified,         # 5% 达标状态（需签完足额）
+                "shortage": shortage                  # 距离 5% 还需核查签名户数
+            }
+        }
 
 class SignatureSaveRequest(BaseModel):
     cbfbm: str
@@ -1864,15 +2065,20 @@ async def api_update_waiye_phone(req: WaiyePhoneUpdateRequest, request: Request 
         return {"code": 200, "message": "电话更新成功", "lxdh": clean_lxdh, "updated_count": res.rowcount}
 
 class ExportWaiyeAtt8Request(BaseModel):
-    township_name: str
+    township_name: Optional[str] = ""
     village_name: Optional[str] = None
     group_name: Optional[str] = None
     group_code: Optional[str] = None
 
 @app.post("/api/export_waiye_att8")
 async def api_export_waiye_att8(req: ExportWaiyeAtt8Request, request: Request = None):
+    clean_gc = (req.group_code or "").strip()
+    clean_tn = (req.township_name or "").strip()
+    clean_vn = (req.village_name or "").strip()
+    clean_gn = (req.group_name or "").strip()
+
     async with SessionLocal() as session:
-        if req.group_code:
+        if clean_gc:
             sql = text("""
                 SELECT id, township_name, village_name, group_name,
                        cbfmc, cbfbm, cbfbm_short, lxdh, dkmc, dkbm_short, scmj,
@@ -1882,8 +2088,8 @@ async def api_export_waiye_att8(req: ExportWaiyeAtt8Request, request: Request = 
                 WHERE group_code = :gc
                 ORDER BY cbfbm, id
             """)
-            res = await session.execute(sql, {"gc": req.group_code})
-        elif req.village_name and req.group_name:
+            res = await session.execute(sql, {"gc": clean_gc})
+        elif clean_vn and clean_gn:
             sql = text("""
                 SELECT id, township_name, village_name, group_name,
                        cbfmc, cbfbm, cbfbm_short, lxdh, dkmc, dkbm_short, scmj,
@@ -1893,8 +2099,8 @@ async def api_export_waiye_att8(req: ExportWaiyeAtt8Request, request: Request = 
                 WHERE township_name = :tn AND village_name = :vn AND group_name = :gn
                 ORDER BY cbfbm, id
             """)
-            res = await session.execute(sql, {"tn": req.township_name, "vn": req.village_name, "gn": req.group_name})
-        else:
+            res = await session.execute(sql, {"tn": clean_tn, "vn": clean_vn, "gn": clean_gn})
+        elif clean_tn:
             sql = text("""
                 SELECT id, township_name, village_name, group_name,
                        cbfmc, cbfbm, cbfbm_short, lxdh, dkmc, dkbm_short, scmj,
@@ -1904,7 +2110,9 @@ async def api_export_waiye_att8(req: ExportWaiyeAtt8Request, request: Request = 
                 WHERE township_name = :tn
                 ORDER BY village_name, group_name, cbfbm, id
             """)
-            res = await session.execute(sql, {"tn": req.township_name})
+            res = await session.execute(sql, {"tn": clean_tn})
+        else:
+            return {"code": 400, "message": "请指定导出的乡镇名称或村民小组编码"}
             
         rows = res.fetchall()
         if not rows:
@@ -2251,6 +2459,7 @@ async def get_waiye_townships_summary():
             effect_score = (sat_cnt / p_cnt * 10.0) if p_cnt > 0 else 10.0
             
             township_map[t_name]["groups"].append({
+                "township_name": t_name,
                 "village_name": r[1],
                 "group_name": r[2],
                 "group_code": r[3],
@@ -2304,9 +2513,9 @@ class ExportAtt1011Request(BaseModel):
 async def get_score_summary():
     from score_service import get_all_township_scores, calculate_county_averages
     async with SessionLocal() as session:
-        scores, c_mech, has_c = await get_all_township_scores(session)
+        scores, c_mech, has_c, c_eff = await get_all_township_scores(session)
         
-    county_avg = calculate_county_averages(scores, c_mech, has_c)
+    county_avg = calculate_county_averages(scores, c_mech, has_c, c_eff)
     return {
         "code": 200,
         "data": {
@@ -2324,7 +2533,7 @@ async def api_export_att10():
     from score_service import get_all_township_scores
     from doc_exporter_score import export_att10
     async with SessionLocal() as session:
-        scores, c_mech, _ = await get_all_township_scores(session)
+        scores, c_mech, _, _ = await get_all_township_scores(session)
     url = await asyncio.to_thread(export_att10, scores, c_mech)
     return {"code": 200, "url": url}
 
@@ -2333,9 +2542,9 @@ async def api_export_att11(req: ExportAtt1011Request):
     from score_service import get_all_township_scores, calculate_county_averages
     from doc_exporter_score import export_att11
     async with SessionLocal() as session:
-        scores, c_mech, has_c = await get_all_township_scores(session)
+        scores, c_mech, has_c, c_eff = await get_all_township_scores(session)
         
-    county_avg = calculate_county_averages(scores, c_mech, has_c)
+    county_avg = calculate_county_averages(scores, c_mech, has_c, c_eff)
     deduct = (0.5 if req.special1 else 0.0) + (1.0 if req.special2 else 0.0) + req.special3
     final_score = county_avg["mech"] + county_avg["prog_nei"] + county_avg["policy"] + county_avg["effect_nei"] + county_avg["prog_wai"] + county_avg["effect_wai"] - deduct
     final_score = max(round(final_score, 1), 0.0)
@@ -2375,14 +2584,16 @@ async def api_export_village_sample_stats():
     """实时重新统计并导出全县各行政村抽样比例统计表 (.xlsx)"""
     from generate_village_sample_stats import query_village_sample_stats, build_excel
     village_data = await query_village_sample_stats()
+    county_info, _ = get_county_and_townships_sync()
+    county_name = county_info.get("name", "全椒县")
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    root_path = os.path.abspath(os.path.join(base_dir, "..", "全椒县各行政村抽样比例统计表.xlsx"))
-    download_path = os.path.abspath(os.path.join(base_dir, "downloads", "全椒县各行政村抽样比例统计表.xlsx"))
-    await asyncio.to_thread(build_excel, village_data, [root_path, download_path])
+    excel_name = f"{county_name}各行政村抽样比例统计表.xlsx"
+    download_path = os.path.abspath(os.path.join(base_dir, "downloads", excel_name))
+    await asyncio.to_thread(build_excel, village_data, [download_path], county_name=county_name)
     return {
         "code": 200, 
         "message": "各行政村抽样比例统计表生成成功",
-        "url": "/api/download?file=downloads/全椒县各行政村抽样比例统计表.xlsx"
+        "url": f"/api/download?file=downloads/{excel_name}"
     }
 
 @app.get("/api/export_rectify_att12")
@@ -2426,6 +2637,50 @@ async def api_export_rectify_att13(township_code: str = "", township_name: str =
                 "dkmc": r[12] or ""
             })
     url = await asyncio.to_thread(export_rectify_att13, township_name, neiye_form, waiye_rows)
+    return {"code": 200, "url": url}
+
+@app.get("/api/export_county_issue_feedback_summary")
+@app.post("/api/export_county_issue_feedback_summary")
+async def api_export_county_issue_feedback_summary(request: Request = None):
+    """导出全县问题反馈记录表汇总 (.doc)"""
+    url = await asyncio.to_thread(export_county_issue_feedback_summary)
+    record_check_audit(
+        module_type="自查整改",
+        action_type="导出问题反馈记录表汇总",
+        target_desc="全县问题汇总",
+        details=f"生成文档: {url.split('file=')[-1]}",
+        request=request
+    )
+    return {"code": 200, "url": url}
+
+class ExportNeiyeFeedbackRequest(BaseModel):
+    qsdwdm: str
+    level: str
+    township_name: Optional[str] = ""
+    village_name: Optional[str] = ""
+    qsdwmc: Optional[str] = ""
+    form_data: Optional[dict] = None
+
+@app.post("/api/neiye/export_feedback_summary")
+async def api_export_neiye_feedback_summary(req: ExportNeiyeFeedbackRequest, request: Request = None):
+    """内业核查模块按核查对象层级导出问题反馈记录表汇总 (.doc)，严格仅限内业核查问题"""
+    url = await asyncio.to_thread(
+        export_issue_feedback_summary_by_level,
+        level=req.level,
+        qsdwdm=req.qsdwdm,
+        township_name=req.township_name,
+        village_name=req.village_name,
+        qsdwmc=req.qsdwmc,
+        current_form_data=req.form_data,
+        include_waiye=False
+    )
+    record_check_audit(
+        module_type="内业核查",
+        action_type="导出问题反馈记录表汇总",
+        target_desc=f"{req.qsdwmc or req.township_name or req.village_name} ({req.level})",
+        details=f"生成文档: {url.split('file=')[-1]}",
+        request=request
+    )
     return {"code": 200, "url": url}
 
 
@@ -2892,19 +3147,32 @@ async def api_export_village_meeting_photos(req: ExportVillagePhotosRequest):
     v_name = (req.village_name or "").strip()
     photos = req.photos or []
 
+    shooting_date = None
     async with SessionLocal() as session:
-        if clean_vcode and not photos:
+        if clean_vcode:
             v_target = f"VILLAGE_{clean_vcode}"
             res = await session.execute(
-                text("SELECT form_data, township_name, village_name FROM waiye_inquiries WHERE cbfbm = :t LIMIT 1"),
+                text("SELECT form_data, township_name, village_name, updated_at FROM waiye_inquiries WHERE cbfbm = :t LIMIT 1"),
                 {"t": v_target}
             )
             row = res.fetchone()
             if row:
                 fd = row[0] or {}
-                photos = fd.get("photos") or []
+                if not photos:
+                    photos = fd.get("photos") or []
                 if not t_name: t_name = row[1] or ""
                 if not v_name: v_name = row[2] or ""
+                shooting_date = row[3]
+        elif t_name and v_name:
+            res = await session.execute(
+                text("SELECT form_data, updated_at FROM waiye_inquiries WHERE township_name = :tn AND village_name = :vn AND cbfbm LIKE 'VILLAGE_%' LIMIT 1"),
+                {"tn": t_name, "vn": v_name}
+            )
+            row = res.fetchone()
+            if row:
+                if not photos:
+                    photos = (row[0] or {}).get("photos") or []
+                shooting_date = row[1]
 
         # 如果没有传乡镇名和村名，尝试通过代码反查
         if (not t_name or not v_name) and clean_vcode:
@@ -2916,7 +3184,20 @@ async def api_export_village_meeting_photos(req: ExportVillagePhotosRequest):
             if q_row:
                 v_name = v_name or q_row[1]
 
-    url = await asyncio.to_thread(export_village_meeting_photos, t_name, v_name, photos)
+        # 查询该行政村已完成问询的承包方代表姓名列表（排除行政村现场会）
+        interviewees = []
+        if t_name and v_name:
+            r_int = await session.execute(
+                text("""
+                    SELECT DISTINCT cbfmc FROM waiye_inquiries
+                    WHERE township_name = :tn AND village_name = :vn AND cbfbm NOT LIKE 'VILLAGE_%'
+                    ORDER BY cbfmc
+                """),
+                {"tn": t_name, "vn": v_name}
+            )
+            interviewees = [r[0] for r in r_int.fetchall() if r[0] and r[0] != "行政村现场会"]
+
+    url = await asyncio.to_thread(export_village_meeting_photos, t_name, v_name, photos, interviewees, shooting_date)
     return {"code": 200, "url": url}
 
 class InquirySaveRequest(BaseModel):

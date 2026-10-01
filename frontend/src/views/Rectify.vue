@@ -2,7 +2,25 @@
   <div class="rectify">
     <van-nav-bar title="自查整改" left-text="返回" left-arrow @click-left="onBack" />
     <div class="page-body">
-      <van-cell-group inset title="选择乡镇">
+      <!-- 全县问题反馈记录表汇总 -->
+      <van-cell-group inset title="全县问题反馈记录表汇总">
+        <div style="padding: 14px 16px;">
+          <div style="font-size: 13px; color: #666; margin-bottom: 12px; line-height: 1.5;">
+            汇总全县各级（县本级、乡镇级、村级）内业核查与外业实地核查发现的全部问题，按“严重、较重、一般”三等评定归类，自动输出横向《问题反馈记录表汇总》。
+          </div>
+          <van-button
+            round
+            block
+            type="warning"
+            icon="orders-o"
+            :loading="exportingSummary"
+            @click="onExportCountySummary"
+          >导出全县问题反馈记录表汇总 (.doc)</van-button>
+        </div>
+      </van-cell-group>
+
+      <!-- 按乡镇整改通知与台账 -->
+      <van-cell-group inset title="按乡镇整改通知书与销号台账" style="margin-top: 16px;">
         <van-field
           v-model="areaText"
           label="乡镇"
@@ -61,17 +79,41 @@ const pickerColumns = ref([])
 
 const exporting12 = ref(false)
 const exporting13 = ref(false)
+const exportingSummary = ref(false)
 
 const triggerDownload = (url) => {
-  const link = document.createElement('a')
-  link.href = encodeURI(url)
-  link.setAttribute('download', '')
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
+  if (!url) return;
+  const encodedUrl = encodeURI(decodeURI(url));
+  const link = document.createElement('a');
+  link.href = encodedUrl;
+  link.setAttribute('download', '');
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 const onBack = () => router.back()
+
+const onExportCountySummary = async () => {
+  if (exportingSummary.value) return;
+  exportingSummary.value = true;
+  showLoadingToast({ message: '正在汇总全县问题反馈记录...', forbidClick: true });
+  try {
+    const res = await axios.get('/api/export_county_issue_feedback_summary');
+    if (res.data.code === 200 && res.data.url) {
+      triggerDownload(res.data.url);
+      showToast({ type: 'success', message: '全县问题反馈记录表汇总已生成！' });
+    } else {
+      showToast(res.data.message || '导出失败');
+    }
+  } catch (e) {
+    console.error('导出全县问题反馈汇总失败:', e);
+    showToast('导出失败');
+  } finally {
+    exportingSummary.value = false;
+    closeToast();
+  }
+};
 
 const initPickerColumns = async () => {
   try {

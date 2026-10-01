@@ -65,10 +65,17 @@ async def query_village_sample_stats():
 
         return village_list
 
-def build_excel(village_data, output_paths):
+def build_excel(village_data, output_paths, county_name=None):
     """
     创建带边框、单元格居中、开启自动换行的标准 Excel 统计表
     """
+    if not county_name:
+        try:
+            county_info, _ = get_county_and_townships_sync()
+            county_name = county_info.get("name", "全椒县")
+        except Exception:
+            county_name = "全椒县"
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "各村抽样比例统计"
@@ -108,7 +115,7 @@ def build_excel(village_data, output_paths):
     # 1. 标题行 (Row 1)
     ws.merge_cells("A1:J1")
     cell_a1 = ws["A1"]
-    cell_a1.value = "全椒县二轮延包县级验收 — 各行政村抽样比例统计表"
+    cell_a1.value = f"{county_name}二轮延包县级验收 — 各行政村抽样比例统计表"
     cell_a1.font = font_title
     cell_a1.alignment = align_center
     ws.row_dimensions[1].height = 40
@@ -249,14 +256,15 @@ def build_excel(village_data, output_paths):
         print(f"Successfully saved: {p}")
 
 async def main():
-    print("=== 开始从数据库重新统计全椒县各行政村抽样比例统计表 ===")
+    county_info, _ = get_county_and_townships_sync()
+    county_name = county_info.get("name", "全椒县")
+    print(f"=== 开始从数据库重新统计{county_name}各行政村抽样比例统计表 ===")
     village_data = await query_village_sample_stats()
     print(f"统计完成，共获取 {len(village_data)} 个抽样行政村的数据。")
     
-    root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "全椒县各行政村抽样比例统计表.xlsx"))
-    download_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "downloads", "全椒县各行政村抽样比例统计表.xlsx"))
+    download_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "downloads", f"{county_name}各行政村抽样比例统计表.xlsx"))
     
-    build_excel(village_data, [root_path, download_path])
+    build_excel(village_data, [download_path], county_name=county_name)
     print("=== 全部生成完成！ ===")
 
 if __name__ == "__main__":

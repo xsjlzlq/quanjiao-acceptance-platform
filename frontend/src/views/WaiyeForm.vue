@@ -40,6 +40,63 @@
 
         <!-- 选中组别后展示数据与操作 -->
         <div v-if="currentGroupCode && groupSamples.length > 0">
+          <!-- 对应行政村的抽检核查总体进度卡片（所选核查组对应村的总户数、已核查完户数、占比及实时刷新） -->
+          <div v-if="currentVillageStats" class="village-progress-card">
+            <div class="v-card-header">
+              <div class="v-title-row">
+                <van-icon name="wap-home-o" color="#1989fa" size="17" />
+                <span class="v-name">{{ currentVillageStats.village_name || currentVillageName }} 整体抽检核查进度</span>
+                <van-tag :type="currentVillageStats.is_qualified ? 'success' : 'warning'" size="medium" round>
+                  {{ currentVillageStats.is_qualified ? '达标 (≥5%)' : `未达标 (差${currentVillageStats.shortage}户)` }}
+                </van-tag>
+              </div>
+              <van-button 
+                size="mini" 
+                icon="replay" 
+                plain 
+                round 
+                type="primary" 
+                :loading="refreshingVillageStats" 
+                @click="fetchVillageCheckProgress(currentGroupCode, true)"
+              >
+                刷新
+              </van-button>
+            </div>
+
+            <div class="v-stats-row">
+              <div class="v-stat-box">
+                <div class="v-stat-val">{{ currentVillageStats.total_cbf_count }} <span class="v-unit">户</span></div>
+                <div class="v-stat-label">该村总户数</div>
+              </div>
+              <div class="v-stat-box">
+                <div class="v-stat-val text-primary">{{ currentVillageStats.checked_cbf_count }} <span class="v-unit">户</span></div>
+                <div class="v-stat-label">已核查完户数(已签名)</div>
+              </div>
+              <div class="v-stat-box">
+                <div class="v-stat-val" :class="currentVillageStats.is_qualified ? 'text-success' : 'text-danger'">
+                  {{ currentVillageStats.ratio_pct }}%
+                </div>
+                <div class="v-stat-label">占该村总户数比例</div>
+              </div>
+            </div>
+
+            <!-- 5% 验收门槛进度条及辅助信息 -->
+            <div class="v-progress-bar-wrap">
+              <van-progress 
+                :percentage="Math.min(currentVillageStats.ratio_pct * 20, 100)" 
+                :color="currentVillageStats.is_qualified ? '#07c160' : '#ff976a'"
+                :show-pivot="false"
+                stroke-width="5"
+              />
+              <div class="v-progress-hint">
+                <span>验收底线：≥ 5%（需签完核查至少 {{ currentVillageStats.required_5pct }} 户）</span>
+                <span class="v-signed-text">
+                  抽检完成度：{{ currentVillageStats.checked_cbf_count }}/{{ currentVillageStats.sampled_cbf_count || currentVillageStats.checked_cbf_count }} 户
+                </span>
+              </div>
+            </div>
+          </div>
+
           <!-- 组别得分与操作卡片 -->
           <div class="group-card">
             <div class="group-title">
@@ -359,7 +416,7 @@
         <!-- 场景A：县级导出（导出附件9） -->
         <div v-if="exportLevel === 'county'" class="export-panel">
           <div class="panel-header">
-            <div class="panel-title">全椒县县级自查外业汇总</div>
+            <div class="panel-title">县级自查外业汇总</div>
             <van-tag type="warning" size="medium">县级层级</van-tag>
           </div>
           <div class="panel-desc">
@@ -665,22 +722,13 @@
           />
 
           <!-- 电子签名区 -->
-          <div style="margin-top: 20px; font-weight: bold; margin-left: 16px; margin-bottom: 10px;">被询问人确认</div>
+          <div style="margin-top: 20px; font-weight: bold; margin-left: 16px; margin-bottom: 10px;">询问人签名确认</div>
           <van-cell-group inset style="margin-bottom: 30px;">
-            <div style="display: flex; justify-content: space-around; padding: 16px; gap: 16px;">
-              <!-- bxwrqm -->
-              <div style="flex: 1; max-width: 220px; text-align: center;">
-                <div style="font-size: 13px; font-weight: 500; margin-bottom: 8px; color: #323233;">被询问人签名</div>
-                <div @click="openInquirySign('bxwrqm')" style="height: 68px; border: 1px dashed #c8c9cc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 6px; overflow: hidden; cursor: pointer;">
-                  <img v-if="inquiryForm.bxwrqm" :src="inquiryForm.bxwrqm" style="max-height: 100%; max-width: 100%;" />
-                  <van-icon v-else name="edit" size="24" color="#969799" />
-                </div>
-              </div>
-
+            <div style="display: flex; justify-content: center; padding: 16px;">
               <!-- xwrqm -->
-              <div style="flex: 1; max-width: 220px; text-align: center;">
+              <div style="width: 100%; max-width: 280px; text-align: center;">
                 <div style="font-size: 13px; font-weight: 500; margin-bottom: 8px; color: #323233;">询问人签名</div>
-                <div @click="openInquirySign('xwrqm')" style="height: 68px; border: 1px dashed #c8c9cc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 6px; overflow: hidden; cursor: pointer;">
+                <div @click="openInquirySign('xwrqm')" style="height: 76px; border: 1px dashed #c8c9cc; display: flex; align-items: center; justify-content: center; background: #fafbfc; border-radius: 6px; overflow: hidden; cursor: pointer;">
                   <img v-if="inquiryForm.xwrqm" :src="inquiryForm.xwrqm" style="max-height: 100%; max-width: 100%;" />
                   <van-icon v-else name="edit" size="24" color="#969799" />
                 </div>
@@ -832,6 +880,9 @@ const onTabChange = (idx) => {
   try {
     sessionStorage.setItem('waiye_active_tab', String(idx));
   } catch (e) {}
+  if (idx === 0 && currentGroupCode.value) {
+    fetchVillageCheckProgress(currentGroupCode.value);
+  }
 };
 
   const INQUIRY_QUESTIONS = [
@@ -1263,7 +1314,7 @@ const onTabChange = (idx) => {
 
 
   const downloadFile = (url) => {
-    window.open(url, '_blank');
+    triggerDownload(url);
   };
 
 // ================= Tab 1: 外业核查 =================
@@ -1278,6 +1329,8 @@ const currentGroupName = ref('');
 const currentGroupCode = ref('');
 
 const groupSamples = ref([]);
+const currentVillageStats = ref(null);
+const refreshingVillageStats = ref(false);
 
 const searchQuery = ref('');
 const currentContractorPage = ref(1);
@@ -2049,6 +2102,7 @@ const silentAutoSave = async () => {
       lastAutoSaveTime.value = timeStr;
       showToast({ message: `外业核查已自动保存 (${timeStr})`, position: 'bottom', duration: 1500 });
       await fetchTownshipsSummary();
+      fetchVillageCheckProgress(currentGroupCode.value);
     }
   } catch(e) {
     console.warn('外业自动保存异常', e);
@@ -2423,11 +2477,38 @@ const loadGroupSamples = async (gCode, tName, vName, gName) => {
           phone_correct: item.phone_correct || ''
         };
       });
+      if (res.data.village_stats) {
+        currentVillageStats.value = res.data.village_stats;
+      } else {
+        fetchVillageCheckProgress(gCode);
+      }
     }
   } catch(e) {
     showToast('加载地块记录失败');
   } finally {
     closeToast();
+  }
+};
+
+// 实时获取并刷新所选核查组对应行政村的抽检进度统计
+const fetchVillageCheckProgress = async (gCode = null, showFeedback = false) => {
+  const code = gCode || currentGroupCode.value;
+  if (!code) return;
+  if (showFeedback) refreshingVillageStats.value = true;
+  try {
+    const res = await axios.get('/api/waiye/village_check_progress', {
+      params: { group_code: code }
+    });
+    if (res.data.code === 200 && res.data.data) {
+      currentVillageStats.value = res.data.data;
+      if (showFeedback) {
+        showToast({ type: 'success', message: '村级核查进度已刷新' });
+      }
+    }
+  } catch (e) {
+    console.error('刷新村级核查进度失败:', e);
+  } finally {
+    if (showFeedback) refreshingVillageStats.value = false;
   }
 };
 
@@ -2513,6 +2594,7 @@ const saveAll = async () => {
     if (res.data.code === 200) {
       showToast({ type: 'success', message: '外业核查状态已保存到数据库！' });
       await fetchTownshipsSummary();
+      fetchVillageCheckProgress(currentGroupCode.value);
     } else {
       showToast(res.data.message || '保存失败');
     }
@@ -2525,8 +2607,10 @@ const saveAll = async () => {
 };
 
 const triggerDownload = (url) => {
+  if (!url) return;
+  const encodedUrl = encodeURI(decodeURI(url));
   const link = document.createElement('a');
-  link.href = url;
+  link.href = encodedUrl;
   link.setAttribute('download', '');
   document.body.appendChild(link);
   link.click();
@@ -2725,6 +2809,7 @@ const saveSignature = async () => {
         }
       }
       await saveAllSilent();
+      fetchVillageCheckProgress(currentGroupCode.value);
       showToast({ type: 'success', message: `【${targetCbfmc}】代表手写签名保存成功！` });
       closeSignModal();
     } else {
@@ -2768,36 +2853,44 @@ const onExportAtt9 = async () => {
 };
 
 const onExportTownshipAllAtt8 = async () => {
-  if (!exportTownshipName.value) return;
+  if (!exportTownshipName.value) {
+    showToast('请先选择导出乡镇');
+    return;
+  }
   exportingTownshipAtt8.value = true;
-  showLoadingToast({ message: `生成 ${exportTownshipName.value} 附件8...`, forbidClick: true });
+  showLoadingToast({ message: `生成 ${exportTownshipName.value} 全部附件8...`, forbidClick: true });
   try {
     const res = await axios.post('/api/export_waiye_att8', {
       township_name: exportTownshipName.value
     }, { timeout: 300000 });
     if (res.data.code === 200 && res.data.urls) {
       showToast({ type: 'success', message: `已生成 ${res.data.count} 份附件8，正在下载...` });
-      for (const u of res.data.urls) {
-        triggerDownload(u);
+      for (let i = 0; i < res.data.urls.length; i++) {
+        setTimeout(() => {
+          triggerDownload(res.data.urls[i]);
+        }, i * 400);
       }
     } else {
       showToast(res.data.message || '生成失败');
     }
   } catch(e) {
+    console.error('批量导出附件8失败:', e);
     showToast('批量导出失败');
   } finally {
     exportingTownshipAtt8.value = false;
+    closeToast();
   }
 };
 
 const onExportSingleGroupAtt8 = async (grp) => {
-  showLoadingToast({ message: '生成附件8...', forbidClick: true });
+  if (!grp) return;
+  showLoadingToast({ message: '正在生成附件8...', forbidClick: true });
   try {
     const res = await axios.post('/api/export_waiye_att8', {
-      township_name: exportTownshipName.value,
-      village_name: grp.village_name,
-      group_name: grp.group_name,
-      group_code: grp.group_code
+      township_name: grp.township_name || exportTownshipName.value || currentTownshipName.value || '',
+      village_name: grp.village_name || '',
+      group_name: grp.group_name || '',
+      group_code: grp.group_code || ''
     }, { timeout: 180000 });
     if (res.data.code === 200 && res.data.url) {
       showToast({ type: 'success', message: '附件8已生成，正在下载...' });
@@ -2806,7 +2899,10 @@ const onExportSingleGroupAtt8 = async (grp) => {
       showToast(res.data.message || '生成失败');
     }
   } catch(e) {
+    console.error('导出单组附件8失败:', e);
     showToast('导出失败');
+  } finally {
+    closeToast();
   }
 };
 </script>
@@ -2828,6 +2924,89 @@ const onExportSingleGroupAtt8 = async (grp) => {
   padding: 30px 16px;
   color: #999;
   font-size: 13px;
+}
+
+.village-progress-card {
+  margin: 12px 16px 0;
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  padding: 12px 16px;
+  box-shadow: 0 2px 8px rgba(25, 137, 250, 0.05);
+}
+
+.village-progress-card .v-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.village-progress-card .v-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.village-progress-card .v-name {
+  font-size: 14px;
+  font-weight: bold;
+  color: #1f2937;
+}
+
+.village-progress-card .v-stats-row {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  background: #f8fafc;
+  border-radius: 6px;
+  padding: 8px 4px;
+  margin-bottom: 8px;
+}
+
+.village-progress-card .v-stat-box {
+  text-align: center;
+  flex: 1;
+}
+
+.village-progress-card .v-stat-val {
+  font-size: 16px;
+  font-weight: bold;
+  color: #1e293b;
+  line-height: 1.2;
+}
+
+.village-progress-card .v-unit {
+  font-size: 11px;
+  font-weight: normal;
+  color: #64748b;
+}
+
+.village-progress-card .v-stat-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 3px;
+}
+
+.village-progress-card .v-progress-bar-wrap {
+  margin-top: 4px;
+}
+
+.village-progress-card .v-progress-hint {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 5px;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.village-progress-card .v-signed-text {
+  color: #475569;
+  font-weight: 500;
 }
 
 .group-card {

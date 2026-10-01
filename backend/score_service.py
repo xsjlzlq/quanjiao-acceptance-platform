@@ -34,6 +34,7 @@ async def get_all_township_scores(session):
     
     township_scores = {}
     county_mech = 15.0
+    county_effect = 10.0
     has_county = False
     
     # 将内业记录按代码建立索引
@@ -44,6 +45,7 @@ async def get_all_township_scores(session):
         records_dict[q_dm] = scores
         if q_dm == county_code or lvl == 'county':
             county_mech = scores["mech"]
+            county_effect = scores["effect"]
             has_county = True
 
     # 按照各乡镇下抽样村与乡镇本级的得分计算平均分
@@ -52,8 +54,9 @@ async def get_all_township_scores(session):
         t_code = t_item["code"]
         v_codes = ts_v_map.get(t_name, [])
         
-        # 获取该乡镇自身的机制运行得分 (qsdwdm == t_code)
+        # 获取该乡镇自身的机制运行与工作成效得分 (qsdwdm == t_code)
         township_self_mech = records_dict.get(t_code, {}).get("mech")
+        township_self_effect = records_dict.get(t_code, {}).get("effect")
 
         village_scores = []
         if v_codes:
@@ -66,18 +69,18 @@ async def get_all_township_scores(session):
                 if r_code != county_code and (r_code == t_code or (r_code.startswith(t_code) and len(r_code) > 9)):
                     village_scores.append(sc)
 
-        has_neiye = bool(village_scores) or (township_self_mech is not None)
+        has_neiye = bool(village_scores) or (township_self_mech is not None) or (township_self_effect is not None)
         if village_scores:
             k = len(village_scores)
             village_avg_mech = sum(s["mech"] for s in village_scores) / k
             avg_pn = sum(s["prog"] for s in village_scores) / k
             avg_pol = sum(s["policy"] for s in village_scores) / k
-            avg_en = sum(s["effect"] for s in village_scores) / k
+            village_avg_effect = sum(s["effect"] for s in village_scores) / k
         else:
             village_avg_mech = None
             avg_pn = 30.0
             avg_pol = 15.0
-            avg_en = 10.0
+            village_avg_effect = None
 
         # 机制运行得分计算方式：该乡镇机制运行得分与乡镇下属村的机制运行平均分
         if township_self_mech is not None and village_avg_mech is not None:
@@ -88,6 +91,16 @@ async def get_all_township_scores(session):
             avg_m = village_avg_mech
         else:
             avg_m = 15.0
+
+        # 工作成效得分计算方式：该乡镇工作成效得分与乡镇下属村的工作成效平均分
+        if township_self_effect is not None and village_avg_effect is not None:
+            avg_en = (township_self_effect + village_avg_effect) / 2.0
+        elif township_self_effect is not None:
+            avg_en = township_self_effect
+        elif village_avg_effect is not None:
+            avg_en = village_avg_effect
+        else:
+            avg_en = 10.0
 
         township_scores[t_name] = {
             "mech": avg_m,
@@ -169,11 +182,12 @@ async def get_all_township_scores(session):
         else:
             sc["total"] = None
         
-    return township_scores, county_mech, has_county
+    return township_scores, county_mech, has_county, county_effect
 
-def calculate_county_averages(scores: dict, c_mech: float = 15.0, has_c: bool = False) -> dict:
+def calculate_county_averages(scores: dict, c_mech: float = 15.0, has_c: bool = False, c_eff: float = 10.0) -> dict:
     """
     计算全县各考核维度的加权平均分：
+    - 机制运行与工作成效：包含县本级自查得分与各乡镇得分加权平均
     - 仅以实际开展核查的乡镇数量作为各维度的平均分母，杜绝未评价乡镇稀释得分
     - 若某个维度没有任何乡镇开展核查，则默认满分基准
     """
@@ -193,7 +207,13 @@ def calculate_county_averages(scores: dict, c_mech: float = 15.0, has_c: bool = 
     county_policy = sum(evaluated_policy) / len(evaluated_policy) if evaluated_policy else 15.0
 
     evaluated_eff_nei = [s["effect_nei"] for s in scores.values() if s and s.get("has_neiye")]
-    county_effect_nei = sum(evaluated_eff_nei) / len(evaluated_eff_nei) if evaluated_eff_nei else 10.0
+    if evaluated_eff_nei:
+        if has_c:
+            county_effect_nei = (sum(evaluated_eff_nei) + c_eff) / (len(evaluated_eff_nei) + 1)
+        else:
+            county_effect_nei = sum(evaluated_eff_nei) / len(evaluated_eff_nei)
+    else:
+        county_effect_nei = c_eff if has_c else 10.0
 
     evaluated_prog_wai = [s["prog_wai"] for s in scores.values() if s and s.get("has_waiye")]
     county_prog_wai = sum(evaluated_prog_wai) / len(evaluated_prog_wai) if evaluated_prog_wai else 20.0
