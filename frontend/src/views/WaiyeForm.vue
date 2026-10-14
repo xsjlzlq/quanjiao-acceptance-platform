@@ -431,7 +431,7 @@
               type="warning" 
               icon="description"
               :loading="exportingAtt9" 
-              @click="onExportAtt9"
+              @click="onOpenAtt9Sheet"
             >
               导出附件9 全县外业检查得分表
             </van-button>
@@ -858,6 +858,16 @@
           <van-signature v-if="inquirySignReady" @submit="onInquirySignSubmit" @clear="onInquirySignClear" clear-button-text="清除" pen-color="#000" />
         </div>
       </van-popup>
+
+      <!-- 导出附件9得分表计算方式选项操作面板 -->
+      <van-action-sheet
+        v-model:show="showAtt9Sheet"
+        :actions="att9SheetActions"
+        cancel-text="取消"
+        description="请选择附件9得分计算方式"
+        close-on-click-action
+        @select="onSelectAtt9Action"
+      />
 
 </template>
 
@@ -2834,11 +2844,27 @@ const onExportPickerConfirm = ({ selectedOptions }) => {
   exportTownshipName.value = opt.townshipName || '';
 };
 
-const onExportAtt9 = async () => {
+const showAtt9Sheet = ref(false);
+const att9SheetActions = [
+  { name: '严重问题参与计算得分', value: true, subname: '严重问题正常计入扣分（默认）' },
+  { name: '严重问题不参与计算得分', value: false, subname: '严重问题不计入扣分，仅扣非严重问题' }
+];
+
+const onOpenAtt9Sheet = () => {
+  showAtt9Sheet.value = true;
+};
+
+const onSelectAtt9Action = (action) => {
+  if (action && typeof action.value === 'boolean') {
+    onExportAtt9(action.value);
+  }
+};
+
+const onExportAtt9 = async (includeSevere = true) => {
   exportingAtt9.value = true;
   showLoadingToast({ message: '汇总全县得分生成附件9...', forbidClick: true });
   try {
-    const res = await axios.get('/api/export_waiye_att9');
+    const res = await axios.get('/api/export_waiye_att9?include_severe=' + includeSevere);
     if (res.data.code === 200 && res.data.url) {
       showToast({ type: 'success', message: '附件9已生成，正在下载...' });
       triggerDownload(res.data.url);

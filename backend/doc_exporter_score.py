@@ -14,7 +14,7 @@ def format_score(score):
         return f"{score:.1f}"
     return str(score)
 
-def export_att10(township_scores, county_mech):
+def export_att10(township_scores, county_mech, exclude_severe: bool = False, county_effect: float = 10.0):
     pythoncom.CoInitialize()
     word = None
     doc = None
@@ -31,7 +31,8 @@ def export_att10(township_scores, county_mech):
         base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件10.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_filename = f"附件10_{county_name}县级自查得分汇总表.doc"
+        file_suffix = "_排除严重问题" if exclude_severe else ""
+        out_filename = f"附件10_{county_name}县级自查得分汇总表{file_suffix}.doc"
         out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         if os.path.exists(out_path):
             try: os.remove(out_path)
@@ -78,7 +79,7 @@ def export_att10(township_scores, county_mech):
         # Summary Row (County)
         county_row = t.Rows.Count
         from score_service import calculate_county_averages
-        c_avg = calculate_county_averages(township_scores, county_mech, True)
+        c_avg = calculate_county_averages(township_scores, county_mech, True, county_effect)
 
         t.Cell(county_row, 1).Range.Text = str(N + 1)
         t.Cell(county_row, 2).Range.Text = county_name
@@ -106,7 +107,7 @@ def export_att10(township_scores, county_mech):
     finally:
         pythoncom.CoUninitialize()
 
-def export_att11(county_avg, special1, special2, special3, final_score):
+def export_att11(county_avg, special1, special2, special3, final_score, exclude_severe: bool = False):
     pythoncom.CoInitialize()
     word = None
     doc = None
@@ -122,7 +123,8 @@ def export_att11(county_avg, special1, special2, special3, final_score):
         base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件11.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_filename = f"附件11_{county_name}县级自查验收评定表.doc"
+        file_suffix = "_排除严重问题" if exclude_severe else ""
+        out_filename = f"附件11_{county_name}县级自查验收评定表{file_suffix}.doc"
         out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         if os.path.exists(out_path):
             try: os.remove(out_path)

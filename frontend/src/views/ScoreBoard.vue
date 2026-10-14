@@ -35,9 +35,29 @@
     </van-cell-group>
 
     <div style="margin: 16px;">
-      <van-button v-if="hasPerm('score_export_att10')" round block type="primary" :loading="exporting10" @click="onExportAtt10">导出附件10 (自查得分汇总表)</van-button>
-      <van-button v-if="hasPerm('score_export_att11')" round block type="success" style="margin-top: 10px;" :loading="exporting11" @click="onExportAtt11">导出附件11 (自查验收评定表)</van-button>
-      </div>
+      <van-button v-if="hasPerm('score_export_att10')" round block type="primary" :loading="exporting10" @click="onOpenAtt10Sheet">导出附件10 (自查得分汇总表)</van-button>
+      <van-button v-if="hasPerm('score_export_att11')" round block type="success" style="margin-top: 10px;" :loading="exporting11" @click="onOpenAtt11Sheet">导出附件11 (自查验收评定表)</van-button>
+    </div>
+
+    <!-- 导出附件10选项操作面板 -->
+    <van-action-sheet
+      v-model:show="showAtt10Sheet"
+      :actions="severeFilterActions"
+      cancel-text="取消"
+      description="请选择附件10得分计算方式"
+      close-on-click-action
+      @select="onSelectAtt10Action"
+    />
+
+    <!-- 导出附件11选项操作面板 -->
+    <van-action-sheet
+      v-model:show="showAtt11Sheet"
+      :actions="severeFilterActions"
+      cancel-text="取消"
+      description="请选择附件11得分计算方式"
+      close-on-click-action
+      @select="onSelectAtt11Action"
+    />
   </div>
 </template>
 
@@ -59,6 +79,33 @@ const scoreData = ref({
 
 const exporting10 = ref(false);
 const exporting11 = ref(false);
+
+const showAtt10Sheet = ref(false);
+const showAtt11Sheet = ref(false);
+const severeFilterActions = [
+  { name: '严重问题参与计算得分', value: true, subname: '严重问题正常计入扣分（默认）' },
+  { name: '严重问题不参与计算得分', value: false, subname: '严重问题不计入扣分，仅扣非严重问题' }
+];
+
+const onOpenAtt10Sheet = () => {
+  showAtt10Sheet.value = true;
+};
+
+const onSelectAtt10Action = (action) => {
+  if (action && typeof action.value === 'boolean') {
+    onExportAtt10(action.value);
+  }
+};
+
+const onOpenAtt11Sheet = () => {
+  showAtt11Sheet.value = true;
+};
+
+const onSelectAtt11Action = (action) => {
+  if (action && typeof action.value === 'boolean') {
+    onExportAtt11(action.value);
+  }
+};
 
 const special1 = ref(false);
 const special2 = ref(false);
@@ -93,10 +140,10 @@ watch([special1, special2, special3], async ([s1, s2, s3]) => {
   }
 });
 
-const onExportAtt10 = async () => {
+const onExportAtt10 = async (includeSevere = true) => {
   exporting10.value = true;
   try {
-    const res = await axios.get('/api/export_att10');
+    const res = await axios.get('/api/export_att10?include_severe=' + includeSevere);
     if (res.data.code === 200 && res.data.url) {
       const link = document.createElement('a');
       link.href = res.data.url;
@@ -113,10 +160,15 @@ const onExportAtt10 = async () => {
   }
 };
 
-const onExportAtt11 = async () => {
+const onExportAtt11 = async (includeSevere = true) => {
   exporting11.value = true;
   try {
-    const res = await axios.post('/api/export_att11', { special1: special1.value, special2: special2.value, special3: special3.value });
+    const res = await axios.post('/api/export_att11', {
+      special1: special1.value,
+      special2: special2.value,
+      special3: special3.value,
+      include_severe: includeSevere
+    });
     if (res.data.code === 200 && res.data.url) {
       const link = document.createElement('a');
       link.href = res.data.url;

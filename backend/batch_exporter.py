@@ -399,7 +399,8 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                                area_acknowledged, rights_correct, bound_correct,
                                member_qualified, self_verified, self_signed, phone_correct,
                                cbfbm_short, dkbm_short, dkmc,
-                               survey_method, satisfaction, lxdh, cbfbm
+                               survey_method, satisfaction, lxdh, cbfbm,
+                               scmj AS scmjm, scmj
                         FROM waiye_samples WHERE township_name = :name
                         ORDER BY village_name, group_name, cbfbm
                     """), {"name": township_name})
@@ -411,12 +412,31 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                     for r in waiye_rows:
                         groups[(r['village_name'], r['group_name'])].append(r)
                     
+                    # 查询该乡镇所有小组/村的问询调查更新时间 (组级优先，村级兜底)
+                    r_inqs_att8 = await session.execute(text("""
+                        SELECT township_name, village_name, group_name, updated_at, cbfbm
+                        FROM waiye_inquiries
+                        WHERE township_name = :name AND updated_at IS NOT NULL
+                    """), {"name": township_name})
+                    inq_date_map = {}
+                    village_date_map = {}
+                    for r_inq in r_inqs_att8.fetchall():
+                        itn, ivn, ign, i_up, icbf = r_inq[0], r_inq[1], r_inq[2], r_inq[3], str(r_inq[4] or "")
+                        if icbf.startswith("VILLAGE_"):
+                            village_date_map[(itn, ivn)] = i_up
+                        else:
+                            if (itn, ivn, ign) not in inq_date_map or i_up > inq_date_map[(itn, ivn, ign)]:
+                                inq_date_map[(itn, ivn, ign)] = i_up
+                            if (itn, ivn) not in village_date_map or i_up > village_date_map[(itn, ivn)]:
+                                village_date_map[(itn, ivn)] = i_up
+
                     total_g = len(groups)
                     for g_i, ((v_name, g_name), g_rows) in enumerate(groups.items(), 1):
                         if task_id:
                             cur_pct = 45 + int(35 * g_i / max(total_g, 1))
                             update_export_task(task_id, cur_pct, f"正在生成 附件8 外业核查记录表 ({v_name} - {g_name}, {g_i}/{total_g}, 共 {len(g_rows)} 宗地块)...")
-                        await asyncio.to_thread(export_waiye_att8, township_name, v_name, g_name, g_rows)
+                        g_survey_date = inq_date_map.get((township_name, v_name, g_name)) or village_date_map.get((township_name, v_name))
+                        await asyncio.to_thread(export_waiye_att8, township_name, v_name, g_name, g_rows, g_survey_date)
                         clean_vn = sanitize_filename(v_name)
                         clean_gn = sanitize_filename(g_name)
                         src = os.path.join(downloads_dir, f"附件8_外业核查记录表_{clean_ts}{clean_vn}{clean_gn}.doc")
@@ -540,10 +560,26 @@ async def run_batch_export(level: str, township_code: str, township_name: str, a
                 if "att13" in attachments:
                     if task_id:
                         update_export_task(task_id, 96, f"正在生成 附件13 问题整改销号台账 ({township_name})...")
-                    r1 = await session.execute(text("SELECT form_data FROM neiye_records WHERE qsdwdm = :code"), {"code": township_code})
-                    row = r1.fetchone()
-                    neiye_form = row[0] if (row and row[0]) else {}
-                    await asyncio.to_thread(export_rectify_att13, township_name, neiye_form, waiye_rows)
+                    prefix = f"{township_code[:9]}%" if len(township_code) >= 9 else f"{township_code}%"
+                    r1 = await session.execute(
+                        text("""
+                            SELECT qsdwdm, qsdwmc, level, form_data 
+                            FROM neiye_records 
+                            WHERE qsdwdm = :code OR qsdwdm LIKE :prefix OR qsdwmc LIKE :ts_name
+                            ORDER BY CASE WHEN level = 'township' THEN 1 ELSE 2 END, qsdwdm ASC
+                        """),
+                        {"code": township_code, "prefix": prefix, "ts_name": f"{township_name}%"}
+                    )
+                    neiye_records = []
+                    for row in r1.fetchall():
+                        if row[3]:
+                            neiye_records.append({
+                                "qsdwdm": row[0],
+                                "qsdwmc": row[1] or township_name,
+                                "level": row[2] or "township",
+                                "form_data": row[3]
+                            })
+                    await asyncio.to_thread(export_rectify_att13, township_name, neiye_records, waiye_rows)
                     src = os.path.join(downloads_dir, f"附件13_问题整改销号台账_{clean_ts}.doc")
                     if os.path.exists(src):
                         shutil.copy(src, os.path.join(rectify_dir, f"附件13_问题整改销号台账_{clean_ts}.doc"))

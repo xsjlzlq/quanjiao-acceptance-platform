@@ -22,18 +22,22 @@ NEIYE_HIERARCHY = [
         "tab": "机制运行",
         "groups": [
             {
+                "field": "mech_1",
                 "group": "延包方案与分工",
                 "options": ["未制定方案", "方案未盖章或非红头", "直接套用上级方案", "分工不明确", "制定程序不合法", "方案缺少"]
             },
             {
+                "field": "mech_2",
                 "group": "经费保障",
                 "options": ["支付不规范", "支付不及时", "经费没有县级兜底"]
             },
             {
+                "field": "mech_3",
                 "group": "宣传",
                 "options": ["没有宣传材料", "宣传材料无效", "宣传途径单一"]
             },
             {
+                "field": "mech_4",
                 "group": "培训",
                 "options": ["没有培训材料", "没有分批次培训", "培训材料不齐全", "培训未覆盖县乡村组", "培训材料无效"]
             }
@@ -43,10 +47,12 @@ NEIYE_HIERARCHY = [
         "tab": "程序规范",
         "groups": [
             {
+                "field": "prog_1",
                 "group": "成立机构",
                 "options": ["未召开村民会议", "未选举产生理事会", "未公示理事会名单", "公示时间不足3天", "参会人数不足法定数量", "违规召开村民会议", "理事会成员非本集体经济组织"]
             },
             {
+                "field": "prog_2",
                 "group": "摸底核实",
                 "options": [
                     "没有进行摸底", "摸底表农户未签署", "摸底表中没有表达延包意愿", "摸底表其它签署不齐全",
@@ -57,6 +63,7 @@ NEIYE_HIERARCHY = [
                 ]
             },
             {
+                "field": "prog_3",
                 "group": "制定方案",
                 "options": [
                     "没有延包方案草案", "没有延包方案", "延包方案未上报", "延包方案未公示",
@@ -65,6 +72,7 @@ NEIYE_HIERARCHY = [
                 ]
             },
             {
+                "field": "prog_4",
                 "group": "调查公示",
                 "options": [
                     "没有公示材料", "没有公示或公示不足15天", "公示不足15天", "公示结果未确认（归户表没签署）", "公示结果未确认",
@@ -73,10 +81,12 @@ NEIYE_HIERARCHY = [
                 ]
             },
             {
+                "field": "prog_5",
                 "group": "签订合同",
                 "options": ["合同版本格式不正确", "合同网签率未达到95%", "没有地块示意图"]
             },
             {
+                "field": "prog_6",
                 "group": "完善证书",
                 "options": [
                     "未进行信息共享", "未与不动产登记部门有序衔接", "承包地块间重叠",
@@ -85,6 +95,7 @@ NEIYE_HIERARCHY = [
                 ]
             },
             {
+                "field": "prog_7",
                 "group": "资料归档",
                 "options": [
                     "档案整理第三方无涉密档案整理资质", "没有进行档案验收", "档案验收不符合相关标准",
@@ -99,22 +110,27 @@ NEIYE_HIERARCHY = [
         "tab": "政策落实",
         "groups": [
             {
+                "field": "policy_1",
                 "group": "“大稳定、小调整”落实情况",
                 "options": ["小调整比率过大或手续不齐全", "打乱重分", "违法调整或收回承包地", "没有小调整统计资料或说明"]
             },
             {
+                "field": "policy_2",
                 "group": "保障土地承包权益",
                 "options": ["未保障特殊群体权益", "未保障无地户权益", "没有统计（关注）特殊群体"]
             },
             {
+                "field": "policy_3",
                 "group": "依法收回消亡户承包地",
                 "options": ["没有应收尽收", "采用不正当方式隐匿消亡户", "违规处置消亡土地", "没有统计消亡户", "没有分清实际消亡户和伪消亡户"]
             },
             {
+                "field": "policy_4",
                 "group": "严格机动地和新增耕地管理",
                 "options": ["机动地、新增耕地处置不当", "机动地比率过高", "未统计机动地和新增耕地"]
             },
             {
+                "field": "policy_5",
                 "group": "从严掌握确权确股不确地",
                 "options": ["违背农户意愿强行推进", "确权确股不确地手续不齐全", "没有统计新增确权确亩不确界"]
             }
@@ -124,6 +140,7 @@ NEIYE_HIERARCHY = [
         "tab": "工作成效",
         "groups": [
             {
+                "field": "effect_1",
                 "group": "加强风险防范",
                 "options": ["未建立矛盾纠纷处置机制", "未建立舆情处置办法", "没有矛盾纠纷处理台账", "矛盾纠纷处理台账填写不规范", "没有本级处理的矛盾纠纷处理记录"]
             }
@@ -194,7 +211,13 @@ def export_voucher(qsdwdm, qsdwmc, form_data):
                 for itm in v:
                     if itm: all_checked.add(str(itm).strip())
             elif k.startswith("policy_2_") or k.startswith("policy_3_"):
-                if int(v or 0) > 0:
+                if k.endswith("_other") or k.endswith("_desc") or k.endswith("_checked"):
+                    continue
+                try:
+                    cnt_val = int(v or 0)
+                except (ValueError, TypeError):
+                    cnt_val = 0
+                if cnt_val > 0:
                     # 步进器项标签映射
                     label_map = {
                         "policy_2_1": "未保障特殊群体权益",
@@ -222,10 +245,29 @@ def export_voucher(qsdwdm, qsdwmc, form_data):
             for t_idx, tab_dict in enumerate(NEIYE_HIERARCHY):
                 tab_name = tab_dict["tab"]
                 
-                # 判断该 Tab 是否有选中的问题
+                # 判断该 Tab 是否有选中的问题（包括预设项和“其他”项）
                 tab_groups_with_issues = []
                 for g in tab_dict["groups"]:
-                    g_opts = [o for o in g["options"] if o in all_checked]
+                    fld = g.get("field")
+                    g_opts = []
+                    # 预设项
+                    for o in g["options"]:
+                        if o in all_checked:
+                            g_opts.append((o, o, [o]))
+                    # “其他”项
+                    has_other = False
+                    if fld:
+                        if isinstance(form_data.get(fld), list) and "其他" in form_data.get(fld, []):
+                            has_other = True
+                        elif form_data.get(f"{fld}_other_checked"):
+                            has_other = True
+                    if has_other:
+                        other_txt = str(form_data.get(f"{fld}_other") or form_data.get(f"{fld}_other_desc") or "").strip()
+                        label_show = f"其他：{other_txt}" if other_txt else "其他"
+                        # 查找佐证照片的可能 key
+                        ev_keys = [f"{fld}_其他", "其他"]
+                        g_opts.append(("其他", label_show, ev_keys))
+
                     if g_opts:
                         tab_groups_with_issues.append((g["group"], g_opts))
                         
@@ -255,9 +297,9 @@ def export_voucher(qsdwdm, qsdwmc, form_data):
                     tab_rng.ParagraphFormat.SpaceAfter = 2
                     tab_rng.Collapse(0)
                     
-                    for o_idx, opt_name in enumerate(g_opts, 1):
-                        # 插入问题描述（如：（1）未制定方案）
-                        tab_rng.Text = f"（{o_idx}）{opt_name}\r"
+                    for o_idx, (raw_opt, display_name, ev_search_keys) in enumerate(g_opts, 1):
+                        # 插入问题描述（如：（1）未制定方案 或 （2）其他：具体说明）
+                        tab_rng.Text = f"（{o_idx}）{display_name}\r"
                         tab_rng.Font.Name = "仿宋"
                         tab_rng.Font.Size = 11
                         tab_rng.Font.Bold = False
@@ -267,7 +309,11 @@ def export_voucher(qsdwdm, qsdwmc, form_data):
                         tab_rng.Collapse(0)
                         
                         # 检查并插入该项问题上传的佐证照片
-                        p_objs = evidences.get(opt_name, []) or []
+                        p_objs = []
+                        for ek in ev_search_keys:
+                            if ek in evidences and evidences[ek]:
+                                p_objs.extend(evidences[ek])
+
                         inserted_photos = 0
                         for p_obj in p_objs:
                             raw_u = p_obj.get("url") if isinstance(p_obj, dict) else str(p_obj)

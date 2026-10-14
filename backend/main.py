@@ -1585,7 +1585,8 @@ async def api_export_neiye_att6(req: ExportNeiyeAtt6Request, request: Request = 
         return {"code": 500, "message": f"生成附件6失败: {str(e)}"}
 
 @app.get("/api/export_neiye_att7")
-async def api_export_neiye_att7(request: Request = None):
+async def api_export_neiye_att7(include_severe: bool = True, request: Request = None):
+    exclude_severe = not include_severe
     async with SessionLocal() as session:
         sql = text("SELECT qsdwdm, form_data, score FROM neiye_records")
         res = await session.execute(sql)
@@ -1609,11 +1610,12 @@ async def api_export_neiye_att7(request: Request = None):
         for r in res_sampled_v.fetchall():
             ts_v_map[r[0]].append(str(r[1]))
         
-    url = await asyncio.to_thread(export_neiye_att7, records_dict, dict(ts_v_map))
+    url = await asyncio.to_thread(export_neiye_att7, records_dict, dict(ts_v_map), exclude_severe=exclude_severe)
+    mode_desc = "排除严重问题" if exclude_severe else "严重问题参与计算"
     record_check_audit(
         module_type="内业核查",
         action_type="导出附件7内业检查得分表",
-        target_desc="全县内业得分汇总",
+        target_desc=f"全县内业得分汇总 ({mode_desc})",
         details=f"生成文档: {url.split('file=')[-1]}",
         request=request
     )
@@ -2146,14 +2148,34 @@ async def api_export_waiye_att8(req: ExportWaiyeAtt8Request, request: Request = 
                 "phone_correct": r[20] or ""
             })
             
+        # 查询问询调查时间映射 (组级优先，村级兜底)
+        res_inqs = await session.execute(text("""
+            SELECT township_name, village_name, group_name, updated_at, cbfbm
+            FROM waiye_inquiries
+            WHERE updated_at IS NOT NULL
+        """))
+        inq_date_map = {}
+        village_date_map = {}
+        for r_inq in res_inqs.fetchall():
+            itn, ivn, ign, i_up, icbf = r_inq[0], r_inq[1], r_inq[2], r_inq[3], str(r_inq[4] or "")
+            if icbf.startswith("VILLAGE_"):
+                village_date_map[(itn, ivn)] = i_up
+            else:
+                if (itn, ivn, ign) not in inq_date_map or i_up > inq_date_map[(itn, ivn, ign)]:
+                    inq_date_map[(itn, ivn, ign)] = i_up
+                if (itn, ivn) not in village_date_map or i_up > village_date_map[(itn, ivn)]:
+                    village_date_map[(itn, ivn)] = i_up
+
         urls = []
         for (t_name, v_name, g_name), g_rows in groups_map.items():
+            g_survey_date = inq_date_map.get((t_name, v_name, g_name)) or village_date_map.get((t_name, v_name))
             url = await asyncio.to_thread(
                 export_waiye_att8,
                 t_name,
                 v_name,
                 g_name,
-                g_rows
+                g_rows,
+                g_survey_date
             )
             urls.append(url)
 
@@ -2175,9 +2197,10 @@ async def api_export_waiye_att8(req: ExportWaiyeAtt8Request, request: Request = 
         }
 
 @app.get("/api/export_waiye_att9")
-async def api_export_waiye_att9(request: Request = None):
+async def api_export_waiye_att9(include_severe: bool = True, request: Request = None):
     from database import SessionLocal
     from sqlalchemy import text
+    exclude_severe = not include_severe
     async with SessionLocal() as session:
         sql = text("""
             SELECT id, township_name, village_name, group_name,
@@ -2218,11 +2241,12 @@ async def api_export_waiye_att9(request: Request = None):
                 "phone_correct": r[20] or ""
             })
             
-    url = await asyncio.to_thread(export_waiye_att9, samples_rows)
+    url = await asyncio.to_thread(export_waiye_att9, samples_rows, exclude_severe=exclude_severe)
+    mode_desc = "排除严重问题" if exclude_severe else "严重问题参与计算"
     record_check_audit(
         module_type="外业核查",
         action_type="导出附件9外业检查得分表",
-        target_desc="全县外业抽检汇总",
+        target_desc=f"全县外业抽检汇总 ({mode_desc})",
         details=f"生成文档: {url.split('file=')[-1]}",
         request=request
     )
@@ -2508,12 +2532,14 @@ class ExportAtt1011Request(BaseModel):
     special1: bool
     special2: bool
     special3: float
+    include_severe: Optional[bool] = True
     
 @app.get("/api/score/summary")
-async def get_score_summary():
+async def get_score_summary(include_severe: bool = True):
     from score_service import get_all_township_scores, calculate_county_averages
+    exclude_severe = not include_severe
     async with SessionLocal() as session:
-        scores, c_mech, has_c, c_eff = await get_all_township_scores(session)
+        scores, c_mech, has_c, c_eff = await get_all_township_scores(session, exclude_severe=exclude_severe)
         
     county_avg = calculate_county_averages(scores, c_mech, has_c, c_eff)
     return {
@@ -2529,27 +2555,29 @@ async def get_score_summary():
     }
 
 @app.get("/api/export_att10")
-async def api_export_att10():
+async def api_export_att10(include_severe: bool = True):
     from score_service import get_all_township_scores
     from doc_exporter_score import export_att10
+    exclude_severe = not include_severe
     async with SessionLocal() as session:
-        scores, c_mech, _, _ = await get_all_township_scores(session)
-    url = await asyncio.to_thread(export_att10, scores, c_mech)
+        scores, c_mech, has_c, c_eff = await get_all_township_scores(session, exclude_severe=exclude_severe)
+    url = await asyncio.to_thread(export_att10, scores, c_mech, exclude_severe=exclude_severe, county_effect=c_eff)
     return {"code": 200, "url": url}
 
 @app.post("/api/export_att11")
 async def api_export_att11(req: ExportAtt1011Request):
     from score_service import get_all_township_scores, calculate_county_averages
     from doc_exporter_score import export_att11
+    exclude_severe = not (req.include_severe is not False)
     async with SessionLocal() as session:
-        scores, c_mech, has_c, c_eff = await get_all_township_scores(session)
+        scores, c_mech, has_c, c_eff = await get_all_township_scores(session, exclude_severe=exclude_severe)
         
     county_avg = calculate_county_averages(scores, c_mech, has_c, c_eff)
     deduct = (0.5 if req.special1 else 0.0) + (1.0 if req.special2 else 0.0) + req.special3
     final_score = county_avg["mech"] + county_avg["prog_nei"] + county_avg["policy"] + county_avg["effect_nei"] + county_avg["prog_wai"] + county_avg["effect_wai"] - deduct
     final_score = max(round(final_score, 1), 0.0)
     
-    url = await asyncio.to_thread(export_att11, county_avg, req.special1, req.special2, req.special3, final_score)
+    url = await asyncio.to_thread(export_att11, county_avg, req.special1, req.special2, req.special3, final_score, exclude_severe=exclude_severe)
     return {"code": 200, "url": url}
 
 # ================= 自查整改（附件12 / 附件13） =================
@@ -2602,17 +2630,37 @@ async def api_export_rectify_att12(township_name: str = ""):
     return {"code": 200, "url": url}
 
 @app.get("/api/export_rectify_att13")
-async def api_export_rectify_att13(township_code: str = "", township_name: str = ""):
-    neiye_form = {}
+async def api_export_rectify_att13(
+    township_code: str = "",
+    township_name: str = "",
+    filter_type: str = "all",
+    plan_deadline: str = "",
+    actual_finish_date: str = ""
+):
+    neiye_records = []
     waiye_rows = []
+    exclude_severe = (filter_type == "non_severe")
     async with SessionLocal() as session:
+        # 查询该乡镇本级及下属所有村级的内业记录
+        prefix = f"{township_code[:9]}%" if len(township_code) >= 9 else f"{township_code}%"
         r1 = await session.execute(
-            text("SELECT form_data FROM neiye_records WHERE qsdwdm = :code"),
-            {"code": township_code}
+            text("""
+                SELECT qsdwdm, qsdwmc, level, form_data 
+                FROM neiye_records 
+                WHERE qsdwdm = :code OR qsdwdm LIKE :prefix OR qsdwmc LIKE :ts_name
+                ORDER BY CASE WHEN level = 'township' THEN 1 ELSE 2 END, qsdwdm ASC
+            """),
+            {"code": township_code, "prefix": prefix, "ts_name": f"{township_name}%"}
         )
-        row = r1.fetchone()
-        if row and row[0]:
-            neiye_form = row[0]
+        for row in r1.fetchall():
+            if row[3]:
+                neiye_records.append({
+                    "qsdwdm": row[0],
+                    "qsdwmc": row[1] or township_name,
+                    "level": row[2] or "township",
+                    "form_data": row[3]
+                })
+
         r2 = await session.execute(text("""
             SELECT village_name, group_name, cbfmc,
                    area_acknowledged, rights_correct, bound_correct,
@@ -2636,7 +2684,15 @@ async def api_export_rectify_att13(township_code: str = "", township_name: str =
                 "dkbm_short": r[11] or "",
                 "dkmc": r[12] or ""
             })
-    url = await asyncio.to_thread(export_rectify_att13, township_name, neiye_form, waiye_rows)
+    url = await asyncio.to_thread(
+        export_rectify_att13,
+        township_name,
+        neiye_records,
+        waiye_rows,
+        exclude_severe=exclude_severe,
+        plan_deadline=plan_deadline,
+        actual_finish_date=actual_finish_date
+    )
     return {"code": 200, "url": url}
 
 @app.get("/api/export_county_issue_feedback_summary")
@@ -2660,10 +2716,12 @@ class ExportNeiyeFeedbackRequest(BaseModel):
     village_name: Optional[str] = ""
     qsdwmc: Optional[str] = ""
     form_data: Optional[dict] = None
+    filter_type: Optional[str] = "all" # 'all' | 'non_severe'
 
 @app.post("/api/neiye/export_feedback_summary")
 async def api_export_neiye_feedback_summary(req: ExportNeiyeFeedbackRequest, request: Request = None):
     """内业核查模块按核查对象层级导出问题反馈记录表汇总 (.doc)，严格仅限内业核查问题"""
+    exclude_severe = (req.filter_type == "non_severe")
     url = await asyncio.to_thread(
         export_issue_feedback_summary_by_level,
         level=req.level,
@@ -2672,12 +2730,14 @@ async def api_export_neiye_feedback_summary(req: ExportNeiyeFeedbackRequest, req
         village_name=req.village_name,
         qsdwmc=req.qsdwmc,
         current_form_data=req.form_data,
-        include_waiye=False
+        include_waiye=False,
+        exclude_severe=exclude_severe
     )
+    filter_label = "仅非严重记录" if exclude_severe else "全部记录"
     record_check_audit(
         module_type="内业核查",
         action_type="导出问题反馈记录表汇总",
-        target_desc=f"{req.qsdwmc or req.township_name or req.village_name} ({req.level})",
+        target_desc=f"{req.qsdwmc or req.township_name or req.village_name} ({req.level}) [{filter_label}]",
         details=f"生成文档: {url.split('file=')[-1]}",
         request=request
     )

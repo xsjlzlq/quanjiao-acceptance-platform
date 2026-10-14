@@ -184,6 +184,15 @@ _async_engines = {}
 _sync_engines = {}
 _session_factories = {}
 
+def get_sync_engine(db_name: str = None):
+    """获取或初始化指定数据库的同步连接池"""
+    cfg = load_config()
+    target_db = (db_name or current_db_ctx.get() or cfg.get("db_name", "quanjiao")).strip()
+    if target_db not in _sync_engines:
+        url = build_sync_url(cfg, db_name=target_db)
+        _sync_engines[target_db] = create_engine(url)
+    return _sync_engines[target_db]
+
 def get_engine_for_db(db_name: str = None):
     """获取或初始化指定数据库的异步连接池"""
     cfg = load_config()

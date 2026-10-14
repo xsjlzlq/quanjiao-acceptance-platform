@@ -3,7 +3,7 @@ from collections import defaultdict
 from doc_exporter import calculate_neiye_subscores
 from database import parse_qsdwdmb_hierarchy
 
-async def get_all_township_scores(session):
+async def get_all_township_scores(session, exclude_severe: bool = False):
     # 动态从 qsdwdmb 解析县级代码与有效乡镇列表
     try:
         res_h = await session.execute(text("SELECT qsdwdm, qsdwmc FROM qsdwdmb ORDER BY qsdwdm"))
@@ -41,7 +41,7 @@ async def get_all_township_scores(session):
     records_dict = {}
     for r in nei_rows:
         q_dm, q_mc, fd, lvl = str(r[0]), r[1], r[2] or {}, r[3]
-        scores = calculate_neiye_subscores(fd)["score"]
+        scores = calculate_neiye_subscores(fd, exclude_severe=exclude_severe)["score"]
         records_dict[q_dm] = scores
         if q_dm == county_code or lvl == 'county':
             county_mech = scores["mech"]
@@ -113,29 +113,59 @@ async def get_all_township_scores(session):
             "has_waiye": False
         }
         
-    # Get Waiye (计算规则：村得分由各组得分平均值，乡镇得分为各村平均值)
+    # Get Waiye (计算规则：村得分由各组得分平均值，乡镇得分为各村平均值，与附件9 export_waiye_att9 保持完全一致的去重与扣分标准)
     res_wai = await session.execute(text("""
-        SELECT township_name, village_name, group_code, 
-               SUM(CASE WHEN area_acknowledged='X' THEN 1 ELSE 0 END +
-                   CASE WHEN rights_correct='X' THEN 1 ELSE 0 END +
-                   CASE WHEN bound_correct='X' THEN 1 ELSE 0 END +
-                   CASE WHEN member_qualified='X' THEN 1 ELSE 0 END +
-                   CASE WHEN self_verified='X' THEN 1 ELSE 0 END +
-                   CASE WHEN self_signed='X' THEN 1 ELSE 0 END) as errors,
-               SUM(CASE WHEN satisfaction='满意' THEN 1 ELSE 0 END) as sats,
-               COUNT(*) as total
+        SELECT township_name, village_name, group_name,
+               cbfbm, cbfbm_short, cbfmc,
+               area_acknowledged, rights_correct, bound_correct, member_qualified,
+               self_verified, self_signed, satisfaction, phone_correct
         FROM waiye_samples
-        GROUP BY township_name, village_name, group_code
+        ORDER BY township_name, village_name, group_name, cbfbm, id
     """))
     wai_rows = res_wai.fetchall()
     
-    wai_hierarchy = defaultdict(lambda: defaultdict(list))
+    groups_map = defaultdict(list)
     for r in wai_rows:
-        t_name, v_name, g_code, errors, sats, total = r
-        if total > 0:
-            prog = max(20.0 - float(errors) * 0.5, 0.0)
-            eff = (float(sats) / total * 10.0)
-            wai_hierarchy[t_name][v_name].append((prog, eff))
+        t_n, v_n, g_n = r[0], r[1], r[2]
+        if t_n:
+            groups_map[(t_n, v_n, g_n)].append({
+                "cbfbm": r[3], "cbfbm_short": r[4], "cbfmc": r[5],
+                "area_acknowledged": r[6], "rights_correct": r[7], "bound_correct": r[8],
+                "member_qualified": r[9], "self_verified": r[10], "self_signed": r[11],
+                "satisfaction": r[12], "phone_correct": r[13]
+            })
+
+    wai_hierarchy = defaultdict(lambda: defaultdict(list))
+    for (t_name, v_name, g_name), g_rows in groups_map.items():
+        total_errors = 0
+        satisfaction_count = 0
+        processed_cbfs = set()
+        c_cnt = 0
+        for r in g_rows:
+            # 地块错误项：面积不认可属于严重问题；四至不正确、非本人核实属于非严重问题
+            dk_keys = ["bound_correct", "self_verified"] if exclude_severe else ["area_acknowledged", "bound_correct", "self_verified"]
+            for k in dk_keys:
+                if r.get(k) == "X":
+                    total_errors += 1
+            
+            cbf_key = str(r.get("cbfbm") or r.get("cbfbm_short") or r.get("cbfmc") or "")
+            if cbf_key not in processed_cbfs:
+                processed_cbfs.add(cbf_key)
+                c_cnt += 1
+                # 农户错误项：权属不正确、成员不符合、非本人签名属于严重问题；联系电话不正确属于非严重问题
+                if not exclude_severe:
+                    for k in ["rights_correct", "member_qualified", "self_signed"]:
+                        if r.get(k) == "X":
+                            total_errors += 1
+                if str(r.get("phone_correct", "")).strip() == "X":
+                    total_errors += 1
+                if r.get("satisfaction") == "满意":
+                    satisfaction_count += 1
+                
+        c_cnt = c_cnt if c_cnt > 0 else len(g_rows)
+        prog_score = max(20.0 - total_errors * 0.5, 0.0)
+        effect_score = (satisfaction_count / c_cnt * 10.0) if c_cnt > 0 else 10.0
+        wai_hierarchy[t_name][v_name].append((prog_score, effect_score))
             
     for t_name, v_map in wai_hierarchy.items():
         if valid_names and t_name not in valid_names:

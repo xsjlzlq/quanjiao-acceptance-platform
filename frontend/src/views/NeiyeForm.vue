@@ -40,7 +40,7 @@
           <van-button size="small" type="primary" round :loading="exportingVoucher" @click="onExportVoucher">
             导出凭证记录
           </van-button>
-          <van-button size="small" type="danger" plain round :loading="exportingFeedback" @click="onExportFeedbackSummary">
+          <van-button size="small" type="danger" plain round :loading="exportingFeedback" @click="onOpenFeedbackSheet">
             导出问题反馈记录表汇总
           </van-button>
 <!-- Village/Township Exports -->
@@ -57,7 +57,7 @@
           <van-button v-if="hasPerm('neiye_export_att6')" size="small" type="success" round :loading="exporting6" @click="onExportAtt6">
             导出附件6 检查记录表（1/4、4/4）
           </van-button>
-          <van-button v-if="hasPerm('neiye_export_att7')" size="small" type="warning" round :loading="exporting7" @click="onExportAtt7">
+          <van-button v-if="hasPerm('neiye_export_att7')" size="small" type="warning" round :loading="exporting7" @click="onOpenAtt7Sheet">
             导出附件7 检查得分表
           </van-button>
         </template>
@@ -89,18 +89,28 @@
               </van-cell>
               <!-- 凭证上传区 -->
               <div v-if="form[grp.field] && form[grp.field].includes(opt.label)" class="evidence-box">
+                <!-- 若为“其他”，展示具体描述输入框 -->
+                <div v-if="opt.label === '其他'" class="other-input-wrap">
+                  <van-field
+                    v-model="form[grp.field + '_other']"
+                    label="其他说明"
+                    placeholder="请输入具体的其他扣分问题描述"
+                    @blur="silentAutoSave"
+                    style="padding: 4px 0; background: transparent;"
+                  />
+                </div>
                 <div class="evidence-header">
                   <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
                   <div class="uploader-btns">
-                    <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label)" accept="image/*">
+                    <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label === '其他' ? (grp.field + '_其他') : opt.label)" accept="image/*">
                       <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
                     </van-uploader>
                   </div>
                 </div>
-                <div v-if="getEvidenceList(opt.label).length > 0" class="evidence-imgs">
-                  <div v-for="(img, idx) in getEvidenceList(opt.label)" :key="idx" class="img-thumb">
+                <div v-if="getEvidenceList(opt.label === '其他' ? (grp.field + '_其他') : opt.label).length > 0" class="evidence-imgs">
+                  <div v-for="(img, idx) in getEvidenceList(opt.label === '其他' ? (grp.field + '_其他') : opt.label)" :key="idx" class="img-thumb">
                     <img :src="img.url" @click="previewEvidence(img.url)" />
-                    <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label, idx)">×</span>
+                    <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label === '其他' ? (grp.field + '_其他') : opt.label, idx)">×</span>
                   </div>
                 </div>
               </div>
@@ -124,18 +134,28 @@
                 </van-cell>
                 <!-- 凭证上传区 -->
                 <div v-if="form[grp.field] && form[grp.field].includes(opt.label)" class="evidence-box">
+                  <!-- 若为“其他”，展示具体描述输入框 -->
+                  <div v-if="opt.label === '其他'" class="other-input-wrap">
+                    <van-field
+                      v-model="form[grp.field + '_other']"
+                      label="其他说明"
+                      placeholder="请输入具体的其他扣分问题描述"
+                      @blur="silentAutoSave"
+                      style="padding: 4px 0; background: transparent;"
+                    />
+                  </div>
                   <div class="evidence-header">
                     <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
                     <div class="uploader-btns">
-                      <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label)" accept="image/*">
+                      <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label === '其他' ? (grp.field + '_其他') : opt.label)" accept="image/*">
                         <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
                       </van-uploader>
                     </div>
                   </div>
-                  <div v-if="getEvidenceList(opt.label).length > 0" class="evidence-imgs">
-                    <div v-for="(img, idx) in getEvidenceList(opt.label)" :key="idx" class="img-thumb">
+                  <div v-if="getEvidenceList(opt.label === '其他' ? (grp.field + '_其他') : opt.label).length > 0" class="evidence-imgs">
+                    <div v-for="(img, idx) in getEvidenceList(opt.label === '其他' ? (grp.field + '_其他') : opt.label)" :key="idx" class="img-thumb">
                       <img :src="img.url" @click="previewEvidence(img.url)" />
-                      <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label, idx)">×</span>
+                      <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label === '其他' ? (grp.field + '_其他') : opt.label, idx)">×</span>
                     </div>
                   </div>
                 </div>
@@ -157,18 +177,27 @@
                   </template>
                 </van-cell>
                 <div v-if="form[POLICY_CHECKBOX_1.field] && form[POLICY_CHECKBOX_1.field].includes(opt.label)" class="evidence-box">
+                  <div v-if="opt.label === '其他'" class="other-input-wrap">
+                    <van-field
+                      v-model="form[POLICY_CHECKBOX_1.field + '_other']"
+                      label="其他说明"
+                      placeholder="请输入具体的其他扣分问题描述"
+                      @blur="silentAutoSave"
+                      style="padding: 4px 0; background: transparent;"
+                    />
+                  </div>
                   <div class="evidence-header">
                     <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
                     <div class="uploader-btns">
-                      <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label)" accept="image/*">
+                      <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label === '其他' ? (POLICY_CHECKBOX_1.field + '_其他') : opt.label)" accept="image/*">
                         <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
                       </van-uploader>
                     </div>
                   </div>
-                  <div v-if="getEvidenceList(opt.label).length > 0" class="evidence-imgs">
-                    <div v-for="(img, idx) in getEvidenceList(opt.label)" :key="idx" class="img-thumb">
+                  <div v-if="getEvidenceList(opt.label === '其他' ? (POLICY_CHECKBOX_1.field + '_其他') : opt.label).length > 0" class="evidence-imgs">
+                    <div v-for="(img, idx) in getEvidenceList(opt.label === '其他' ? (POLICY_CHECKBOX_1.field + '_其他') : opt.label)" :key="idx" class="img-thumb">
                       <img :src="img.url" @click="previewEvidence(img.url)" />
-                      <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label, idx)">×</span>
+                      <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label === '其他' ? (POLICY_CHECKBOX_1.field + '_其他') : opt.label, idx)">×</span>
                     </div>
                   </div>
                 </div>
@@ -177,7 +206,7 @@
             <div class="group-tip">{{ POLICY_CHECKBOX_1.tip }}</div>
           </van-cell-group>
 
-          <!-- 2. 保障土地承包权益 (3分) - 步进器 -->
+          <!-- 2. 保障土地承包权益 (3分) - 步进器 + 其他 -->
           <van-cell-group inset title="2. 保障土地承包权益 (3分)" style="margin-top: 10px;">
             <template v-for="st in POLICY_STEPPERS_2" :key="st.field">
               <van-field :name="st.field" :label="st.label">
@@ -205,10 +234,41 @@
                 </div>
               </div>
             </template>
+            <!-- policy_2 其他项 -->
+            <van-cell title="其他 (扣1分)" clickable @click="toggleOtherPolicy('policy_2')">
+              <template #right-icon>
+                <van-checkbox :model-value="isOtherPolicyChecked('policy_2')" @click.stop.prevent="toggleOtherPolicy('policy_2')" />
+              </template>
+            </van-cell>
+            <div v-if="isOtherPolicyChecked('policy_2')" class="evidence-box">
+              <div class="other-input-wrap">
+                <van-field
+                  v-model="form.policy_2_other"
+                  label="其他说明"
+                  placeholder="请输入具体的其他扣分问题描述"
+                  @blur="silentAutoSave"
+                  style="padding: 4px 0; background: transparent;"
+                />
+              </div>
+              <div class="evidence-header">
+                <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
+                <div class="uploader-btns">
+                  <van-uploader :after-read="(f) => onUploadEvidence(f, 'policy_2_其他')" accept="image/*">
+                    <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
+                  </van-uploader>
+                </div>
+              </div>
+              <div v-if="getEvidenceList('policy_2_其他').length > 0" class="evidence-imgs">
+                <div v-for="(img, idx) in getEvidenceList('policy_2_其他')" :key="idx" class="img-thumb">
+                  <img :src="img.url" @click="previewEvidence(img.url)" />
+                  <span class="del-btn" @click.stop.prevent="removeEvidence('policy_2_其他', idx)">×</span>
+                </div>
+              </div>
+            </div>
             <div class="group-tip">注：发现一起扣1分，扣完3分为止。</div>
           </van-cell-group>
 
-          <!-- 3. 依法收回消亡户承包地 (3分) - 步进器 -->
+          <!-- 3. 依法收回消亡户承包地 (3分) - 步进器 + 其他 -->
           <van-cell-group inset title="3. 依法收回消亡户承包地 (3分)" style="margin-top: 10px;">
             <template v-for="st in POLICY_STEPPERS_3" :key="st.field">
               <van-field :name="st.field" :label="st.label">
@@ -236,6 +296,37 @@
                 </div>
               </div>
             </template>
+            <!-- policy_3 其他项 -->
+            <van-cell title="其他 (扣1分)" clickable @click="toggleOtherPolicy('policy_3')">
+              <template #right-icon>
+                <van-checkbox :model-value="isOtherPolicyChecked('policy_3')" @click.stop.prevent="toggleOtherPolicy('policy_3')" />
+              </template>
+            </van-cell>
+            <div v-if="isOtherPolicyChecked('policy_3')" class="evidence-box">
+              <div class="other-input-wrap">
+                <van-field
+                  v-model="form.policy_3_other"
+                  label="其他说明"
+                  placeholder="请输入具体的其他扣分问题描述"
+                  @blur="silentAutoSave"
+                  style="padding: 4px 0; background: transparent;"
+                />
+              </div>
+              <div class="evidence-header">
+                <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
+                <div class="uploader-btns">
+                  <van-uploader :after-read="(f) => onUploadEvidence(f, 'policy_3_其他')" accept="image/*">
+                    <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
+                  </van-uploader>
+                </div>
+              </div>
+              <div v-if="getEvidenceList('policy_3_其他').length > 0" class="evidence-imgs">
+                <div v-for="(img, idx) in getEvidenceList('policy_3_其他')" :key="idx" class="img-thumb">
+                  <img :src="img.url" @click="previewEvidence(img.url)" />
+                  <span class="del-btn" @click.stop.prevent="removeEvidence('policy_3_其他', idx)">×</span>
+                </div>
+              </div>
+            </div>
             <div class="group-tip">注：发现一起扣1分，扣完3分为止。</div>
           </van-cell-group>
 
@@ -249,18 +340,27 @@
                   </template>
                 </van-cell>
                 <div v-if="form[POLICY_CHECKBOX_4.field] && form[POLICY_CHECKBOX_4.field].includes(opt.label)" class="evidence-box">
+                  <div v-if="opt.label === '其他'" class="other-input-wrap">
+                    <van-field
+                      v-model="form[POLICY_CHECKBOX_4.field + '_other']"
+                      label="其他说明"
+                      placeholder="请输入具体的其他扣分问题描述"
+                      @blur="silentAutoSave"
+                      style="padding: 4px 0; background: transparent;"
+                    />
+                  </div>
                   <div class="evidence-header">
                     <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
                     <div class="uploader-btns">
-                      <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label)" accept="image/*">
+                      <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label === '其他' ? (POLICY_CHECKBOX_4.field + '_其他') : opt.label)" accept="image/*">
                         <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
                       </van-uploader>
                     </div>
                   </div>
-                  <div v-if="getEvidenceList(opt.label).length > 0" class="evidence-imgs">
-                    <div v-for="(img, idx) in getEvidenceList(opt.label)" :key="idx" class="img-thumb">
+                  <div v-if="getEvidenceList(opt.label === '其他' ? (POLICY_CHECKBOX_4.field + '_其他') : opt.label).length > 0" class="evidence-imgs">
+                    <div v-for="(img, idx) in getEvidenceList(opt.label === '其他' ? (POLICY_CHECKBOX_4.field + '_其他') : opt.label)" :key="idx" class="img-thumb">
                       <img :src="img.url" @click="previewEvidence(img.url)" />
-                      <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label, idx)">×</span>
+                      <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label === '其他' ? (POLICY_CHECKBOX_4.field + '_其他') : opt.label, idx)">×</span>
                     </div>
                   </div>
                 </div>
@@ -279,18 +379,27 @@
                   </template>
                 </van-cell>
                 <div v-if="form[POLICY_CHECKBOX_5.field] && form[POLICY_CHECKBOX_5.field].includes(opt.label)" class="evidence-box">
+                  <div v-if="opt.label === '其他'" class="other-input-wrap">
+                    <van-field
+                      v-model="form[POLICY_CHECKBOX_5.field + '_other']"
+                      label="其他说明"
+                      placeholder="请输入具体的其他扣分问题描述"
+                      @blur="silentAutoSave"
+                      style="padding: 4px 0; background: transparent;"
+                    />
+                  </div>
                   <div class="evidence-header">
                     <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
                     <div class="uploader-btns">
-                      <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label)" accept="image/*">
+                      <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label === '其他' ? (POLICY_CHECKBOX_5.field + '_其他') : opt.label)" accept="image/*">
                         <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
                       </van-uploader>
                     </div>
                   </div>
-                  <div v-if="getEvidenceList(opt.label).length > 0" class="evidence-imgs">
-                    <div v-for="(img, idx) in getEvidenceList(opt.label)" :key="idx" class="img-thumb">
+                  <div v-if="getEvidenceList(opt.label === '其他' ? (POLICY_CHECKBOX_5.field + '_其他') : opt.label).length > 0" class="evidence-imgs">
+                    <div v-for="(img, idx) in getEvidenceList(opt.label === '其他' ? (POLICY_CHECKBOX_5.field + '_其他') : opt.label)" :key="idx" class="img-thumb">
                       <img :src="img.url" @click="previewEvidence(img.url)" />
-                      <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label, idx)">×</span>
+                      <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label === '其他' ? (POLICY_CHECKBOX_5.field + '_其他') : opt.label, idx)">×</span>
                     </div>
                   </div>
                 </div>
@@ -311,19 +420,29 @@
                   <van-checkbox :name="opt.label" @click.stop.prevent="toggle(grp.field, opt.label)" />
                 </template>
               </van-cell>
+              <!-- 凭证上传区 -->
               <div v-if="form[grp.field] && form[grp.field].includes(opt.label)" class="evidence-box">
+                <div v-if="opt.label === '其他'" class="other-input-wrap">
+                  <van-field
+                    v-model="form[grp.field + '_other']"
+                    label="其他说明"
+                    placeholder="请输入具体的其他扣分问题描述"
+                    @blur="silentAutoSave"
+                    style="padding: 4px 0; background: transparent;"
+                  />
+                </div>
                 <div class="evidence-header">
                   <span class="evidence-title"><van-icon name="photograph" color="#1989fa" /> 扣分凭证：</span>
                   <div class="uploader-btns">
-                    <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label)" accept="image/*">
+                    <van-uploader :after-read="(f) => onUploadEvidence(f, opt.label === '其他' ? (grp.field + '_其他') : opt.label)" accept="image/*">
                       <van-button size="mini" icon="photograph" plain type="primary">拍照/上传</van-button>
                     </van-uploader>
                   </div>
                 </div>
-                <div v-if="getEvidenceList(opt.label).length > 0" class="evidence-imgs">
-                  <div v-for="(img, idx) in getEvidenceList(opt.label)" :key="idx" class="img-thumb">
+                <div v-if="getEvidenceList(opt.label === '其他' ? (grp.field + '_其他') : opt.label).length > 0" class="evidence-imgs">
+                  <div v-for="(img, idx) in getEvidenceList(opt.label === '其他' ? (grp.field + '_其他') : opt.label)" :key="idx" class="img-thumb">
                     <img :src="img.url" @click="previewEvidence(img.url)" />
-                    <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label, idx)">×</span>
+                    <span class="del-btn" @click.stop.prevent="removeEvidence(opt.label === '其他' ? (grp.field + '_其他') : opt.label, idx)">×</span>
                   </div>
                 </div>
               </div>
@@ -339,6 +458,26 @@
       <van-icon name="info-o" size="48" color="#ccc" style="margin-bottom:12px;" />
       <div style="font-size: 15px;">请先在上方选择核查对象（全县或乡镇）</div>
     </div>
+
+    <!-- 导出问题反馈记录表选项操作面板 -->
+    <van-action-sheet
+      v-model:show="showFeedbackSheet"
+      :actions="feedbackSheetActions"
+      cancel-text="取消"
+      description="请选择问题反馈记录导出范围"
+      close-on-click-action
+      @select="onSelectFeedbackAction"
+    />
+
+    <!-- 导出附件7得分表计算方式选项操作面板 -->
+    <van-action-sheet
+      v-model:show="showAtt7Sheet"
+      :actions="att7SheetActions"
+      cancel-text="取消"
+      description="请选择附件7得分计算方式"
+      close-on-click-action
+      @select="onSelectAtt7Action"
+    />
   </div>
 
     
@@ -362,6 +501,41 @@ const saving = ref(false);
 const exporting6 = ref(false);
 const exporting7 = ref(false);
 const exportingFeedback = ref(false);
+const showFeedbackSheet = ref(false);
+const feedbackSheetActions = [
+  { name: '全部记录', value: 'all', subname: '导出严重、较重、一般全部问题' },
+  { name: '仅非严重记录', value: 'non_severe', subname: '排除严重问题，仅导出较重与一般问题' }
+];
+
+const showAtt7Sheet = ref(false);
+const att7SheetActions = [
+  { name: '严重问题参与计算得分', value: true, subname: '严重问题正常计入扣分（默认）' },
+  { name: '严重问题不参与计算得分', value: false, subname: '严重问题不计入扣分，仅扣非严重问题' }
+];
+
+const onOpenAtt7Sheet = () => {
+  showAtt7Sheet.value = true;
+};
+
+const onSelectAtt7Action = (action) => {
+  if (action && typeof action.value === 'boolean') {
+    onExportAtt7(action.value);
+  }
+};
+
+const onOpenFeedbackSheet = () => {
+  if (!selectedAreaCode.value) {
+    showToast('请先在上方选择核查对象');
+    return;
+  }
+  showFeedbackSheet.value = true;
+};
+
+const onSelectFeedbackAction = (action) => {
+  if (action && action.value) {
+    onExportFeedbackSummary(action.value);
+  }
+};
 
 const pickerColumns = ref([]);
 
@@ -377,27 +551,30 @@ const MECH_GROUPS = [
       { label: '直接套用上级方案', desc: '扣2分' },
       { label: '分工不明确', desc: '扣2分' },
       { label: '制定程序不合法', desc: '扣2分' },
-      { label: '方案缺少', desc: '扣2分' }
+      { label: '方案缺少', desc: '扣2分' },
+      { label: '其他', desc: '扣2分' }
     ]
   },
   {
     field: 'mech_2',
     title: '2. 经费保障 (10分)',
-    tip: '注：支付不及时扣4分；支付不规范扣4分；政府未明确兜底经费的扣2分。',
+    tip: '注：支付不及时扣4分；支付不规范扣4分；政府未明确兜底经费的扣2分；其他扣2分。',
     options: [
       { label: '支付不规范', desc: '扣4分' },
       { label: '支付不及时', desc: '扣4分' },
-      { label: '经费没有县级兜底', desc: '扣2分' }
+      { label: '经费没有县级兜底', desc: '扣2分' },
+      { label: '其他', desc: '扣2分' }
     ]
   },
   {
     field: 'mech_3',
     title: '3. 宣传 (2分)',
-    tip: '注：没有宣传材料不得分（扣2分）；宣传材料无效或途径单一按规定扣分。',
+    tip: '注：没有宣传材料不得分（扣2分）；宣传材料无效或途径单一按规定扣分；其他扣2分。',
     options: [
       { label: '没有宣传材料', desc: '扣2分' },
       { label: '宣传材料无效', desc: '扣2分' },
-      { label: '宣传途径单一', desc: '扣2分' }
+      { label: '宣传途径单一', desc: '扣2分' },
+      { label: '其他', desc: '扣2分' }
     ]
   },
   {
@@ -409,7 +586,8 @@ const MECH_GROUPS = [
       { label: '没有分批次培训', desc: '扣0.5分' },
       { label: '培训材料不齐全', desc: '扣0.5分' },
       { label: '培训未覆盖县乡村组', desc: '扣0.5分' },
-      { label: '培训材料无效', desc: '扣0.5分' }
+      { label: '培训材料无效', desc: '扣0.5分' },
+      { label: '其他', desc: '扣0.5分' }
     ]
   }
 ];
@@ -426,7 +604,8 @@ const PROG_GROUPS = [
       { label: '公示时间不足3天', desc: '扣5分' },
       { label: '参会人数不足法定数量', desc: '扣5分' },
       { label: '违规召开村民会议', desc: '扣5分' },
-      { label: '理事会成员非本集体经济组织', desc: '扣5分' }
+      { label: '理事会成员非本集体经济组织', desc: '扣5分' },
+      { label: '其他', desc: '扣5分' }
     ]
   },
   {
@@ -452,7 +631,8 @@ const PROG_GROUPS = [
       { label: '各类统计资料没有封面', desc: '扣0.5分' },
       { label: '各类统计资料没有签章', desc: '扣0.5分' },
       { label: '各类统计资料统计不正确', desc: '扣0.5分' },
-      { label: '摸底与其它材料时间矛盾', desc: '扣0.5分' }
+      { label: '摸底与其它材料时间矛盾', desc: '扣0.5分' },
+      { label: '其他', desc: '扣0.5分' }
     ]
   },
   {
@@ -467,7 +647,8 @@ const PROG_GROUPS = [
       { label: '未召开会议讨论延包方案', desc: '扣5分' },
       { label: '延包方案上报与通过会议时间顺序不正确', desc: '扣5分' },
       { label: '延包方案与工作方案混淆', desc: '扣5分' },
-      { label: '理事会与工作领导小组混淆', desc: '扣5分' }
+      { label: '理事会与工作领导小组混淆', desc: '扣5分' },
+      { label: '其他', desc: '扣5分' }
     ]
   },
   {
@@ -483,7 +664,8 @@ const PROG_GROUPS = [
       { label: '各类资料签署不规范', desc: '扣0.5分' },
       { label: '权属证明材料不齐全', desc: '扣0.5分' },
       { label: '其它证明材料不齐全', desc: '扣0.5分' },
-      { label: '各类资料间时间顺序混乱', desc: '扣0.5分' }
+      { label: '各类资料间时间顺序混乱', desc: '扣0.5分' },
+      { label: '其他', desc: '扣0.5分' }
     ]
   },
   {
@@ -493,13 +675,14 @@ const PROG_GROUPS = [
     options: [
       { label: '合同版本格式不正确', desc: '扣3分' },
       { label: '合同网签率未达到95%', desc: '扣3分' },
-      { label: '没有地块示意图', desc: '扣3分' }
+      { label: '没有地块示意图', desc: '扣3分' },
+      { label: '其他', desc: '扣3分' }
     ]
   },
   {
     field: 'prog_6',
     title: '6. 完善证书 (5分)',
-    tip: '注：前五项发现任意一项扣5分；后两项发现一项扣0.5分，扣完5分为止。',
+    tip: '注：前五项发现任意一项扣5分；后两项发现一项扣0.5分，扣完5分为止；其他扣0.5分。',
     options: [
       { label: '未进行信息共享', desc: '扣5分' },
       { label: '未与不动产登记部门有序衔接', desc: '扣5分' },
@@ -507,13 +690,14 @@ const PROG_GROUPS = [
       { label: '承包地块与宅基地重叠', desc: '扣5分' },
       { label: '承包地块与其它自然资源部门要求的要素重叠', desc: '扣5分' },
       { label: '缺少登记要件', desc: '扣0.5分' },
-      { label: '资料格式不符合登记要求', desc: '扣0.5分' }
+      { label: '资料格式不符合登记要求', desc: '扣0.5分' },
+      { label: '其他', desc: '扣0.5分' }
     ]
   },
   {
     field: 'prog_7',
     title: '7. 资料归档 (5分)',
-    tip: '注：前三项发现任意一项扣5分；后六项发现任意一项扣1分，扣完5分为止。',
+    tip: '注：前三项发现任意一项扣5分；后六项发现任意一项扣1分，扣完5分为止；其他扣1分。',
     options: [
       { label: '档案整理第三方无涉密档案整理资质', desc: '扣5分' },
       { label: '没有进行档案验收', desc: '扣5分' },
@@ -523,7 +707,8 @@ const PROG_GROUPS = [
       { label: '档案资料缺少佐证内容', desc: '扣1分' },
       { label: '档案资料背考表签署不正确', desc: '扣1分' },
       { label: '档案资料存在大量漏签署', desc: '扣1分' },
-      { label: '档案资料姓名错误未检查', desc: '扣1分' }
+      { label: '档案资料姓名错误未检查', desc: '扣1分' },
+      { label: '其他', desc: '扣1分' }
     ]
   }
 ];
@@ -536,7 +721,8 @@ const POLICY_CHECKBOX_1 = {
     { label: '小调整比率过大或手续不齐全', desc: '扣1分' },
     { label: '打乱重分', desc: '扣1分' },
     { label: '违法调整或收回承包地', desc: '扣1分' },
-    { label: '没有小调整统计资料或说明', desc: '扣1分' }
+    { label: '没有小调整统计资料或说明', desc: '扣1分' },
+    { label: '其他', desc: '扣1分' }
   ]
 };
 
@@ -561,7 +747,8 @@ const POLICY_CHECKBOX_4 = {
   options: [
     { label: '机动地、新增耕地处置不当', desc: '扣0.5分' },
     { label: '机动地比率过高', desc: '扣0.5分' },
-    { label: '未统计机动地和新增耕地', desc: '扣0.5分' }
+    { label: '未统计机动地和新增耕地', desc: '扣0.5分' },
+    { label: '其他', desc: '扣0.5分' }
   ]
 };
 
@@ -572,7 +759,8 @@ const POLICY_CHECKBOX_5 = {
   options: [
     { label: '违背农户意愿强行推进', desc: '扣0.5分' },
     { label: '确权确股不确地手续不齐全', desc: '扣0.5分' },
-    { label: '没有统计新增确权确亩不确界', desc: '扣0.5分' }
+    { label: '没有统计新增确权确亩不确界', desc: '扣0.5分' },
+    { label: '其他', desc: '扣0.5分' }
   ]
 };
 
@@ -586,7 +774,8 @@ const EFFECT_GROUPS = [
       { label: '未建立舆情处置办法', desc: '扣1分' },
       { label: '没有矛盾纠纷处理台账', desc: '扣1分' },
       { label: '矛盾纠纷处理台账填写不规范', desc: '扣1分' },
-      { label: '没有本级处理的矛盾纠纷处理记录', desc: '扣1分' }
+      { label: '没有本级处理的矛盾纠纷处理记录', desc: '扣1分' },
+      { label: '其他', desc: '扣1分' }
     ]
   }
 ];
@@ -726,6 +915,40 @@ const onPickerConfirm = ({ selectedOptions }) => {
   loadSavedData(opt.value);
 };
 
+const isOtherPolicyChecked = (group) => {
+  if (Array.isArray(form.value[group])) {
+    return form.value[group].includes('其他');
+  }
+  return form.value[group + '_other_checked'] === true;
+};
+
+const toggleOtherPolicy = async (group) => {
+  const current = isOtherPolicyChecked(group);
+  if (current) {
+    // 检查是否有凭证
+    const evKey = `${group}_其他`;
+    const evidences = form.value.evidences && form.value.evidences[evKey];
+    if (evidences && evidences.length > 0) {
+      showToast({ type: 'fail', message: '已上传凭证，请先删除该项凭证后再取消勾选！' });
+      return;
+    }
+    if (Array.isArray(form.value[group])) {
+      const idx = form.value[group].indexOf('其他');
+      if (idx > -1) form.value[group].splice(idx, 1);
+    }
+    form.value[group + '_other_checked'] = false;
+  } else {
+    if (!Array.isArray(form.value[group])) {
+      form.value[group] = [];
+    }
+    if (!form.value[group].includes('其他')) {
+      form.value[group].push('其他');
+    }
+    form.value[group + '_other_checked'] = true;
+  }
+  await silentAutoSave();
+};
+
 const loadSavedData = async (code) => {
   showLoadingToast({ message: '加载评分...', forbidClick: true });
   try {
@@ -737,6 +960,7 @@ const loadSavedData = async (code) => {
         fd.mech_4 = [];
       }
       form.value = {
+        ...fd,
         mech_1: fd.mech_1 || [],
         mech_2: fd.mech_2 || [],
         mech_3: fd.mech_3 || [],
@@ -749,9 +973,11 @@ const loadSavedData = async (code) => {
         prog_6: fd.prog_6 || [],
         prog_7: fd.prog_7 || [],
         policy_1: fd.policy_1 || [],
+        policy_2: fd.policy_2 || [],
         policy_2_1: fd.policy_2_1 || 0,
         policy_2_2: fd.policy_2_2 || 0,
         policy_2_3: fd.policy_2_3 || 0,
+        policy_3: fd.policy_3 || [],
         policy_3_1: fd.policy_3_1 || 0,
         policy_3_2: fd.policy_3_2 || 0,
         policy_3_3: fd.policy_3_3 || 0,
@@ -770,8 +996,8 @@ const loadSavedData = async (code) => {
       form.value = {
         mech_1: [], mech_2: [], mech_3: [], mech_4: [],
         prog_1: [], prog_2: [], prog_3: [], prog_4: [], prog_5: [], prog_6: [], prog_7: [],
-        policy_1: [], policy_2_1: 0, policy_2_2: 0, policy_2_3: 0,
-        policy_3_1: 0, policy_3_2: 0, policy_3_3: 0, policy_3_4: 0, policy_3_5: 0,
+        policy_1: [], policy_2: [], policy_2_1: 0, policy_2_2: 0, policy_2_3: 0,
+        policy_3: [], policy_3_1: 0, policy_3_2: 0, policy_3_3: 0, policy_3_4: 0, policy_3_5: 0,
         policy_4: [], policy_5: [],
         effect_1: [], jcz_name: '', fhz_name: '', evidences: {}
       };
@@ -788,7 +1014,8 @@ const toggle = async (group, name) => {
   const idx = list.indexOf(name);
   if (idx > -1) {
     // 检查是否有关联凭证，若有凭证则拦截并提示先删除凭证
-    const evidences = form.value.evidences && form.value.evidences[name];
+    const evKey = name === '其他' ? `${group}_其他` : name;
+    const evidences = form.value.evidences && (form.value.evidences[evKey] || form.value.evidences[name]);
     if (evidences && evidences.length > 0) {
       showToast({ type: 'fail', message: '已上传凭证，请先删除该项凭证后再取消勾选！' });
       return;
@@ -820,6 +1047,7 @@ const totalScore = computed(() => {
     if (opt.includes('支付不规范')) d_m2 += 4.0;
     else if (opt.includes('支付不及时')) d_m2 += 4.0;
     else if (opt.includes('兜底')) d_m2 += 2.0;
+    else if (opt.includes('其他')) d_m2 += 2.0;
   }
   d_m2 = Math.min(d_m2, 10.0);
   let d_m3 = form.value.mech_3.length > 0 ? 2.0 : 0.0;
@@ -868,9 +1096,11 @@ const totalScore = computed(() => {
 
   // 3. 政策落实 (满分15)
   let d_pol1 = Math.min(form.value.policy_1.length * 1.0, 3.0);
-  let c_2 = (Number(form.value.policy_2_1) || 0) + (Number(form.value.policy_2_2) || 0) + (Number(form.value.policy_2_3) || 0);
+  let c_2_other = isOtherPolicyChecked('policy_2') ? 1.0 : 0.0;
+  let c_2 = (Number(form.value.policy_2_1) || 0) + (Number(form.value.policy_2_2) || 0) + (Number(form.value.policy_2_3) || 0) + c_2_other;
   let d_pol2 = Math.min(c_2 * 1.0, 3.0);
-  let c_3 = (Number(form.value.policy_3_1) || 0) + (Number(form.value.policy_3_2) || 0) + (Number(form.value.policy_3_3) || 0) + (Number(form.value.policy_3_4) || 0) + (Number(form.value.policy_3_5) || 0);
+  let c_3_other = isOtherPolicyChecked('policy_3') ? 1.0 : 0.0;
+  let c_3 = (Number(form.value.policy_3_1) || 0) + (Number(form.value.policy_3_2) || 0) + (Number(form.value.policy_3_3) || 0) + (Number(form.value.policy_3_4) || 0) + (Number(form.value.policy_3_5) || 0) + c_3_other;
   let d_pol3 = Math.min(c_3 * 1.0, 3.0);
   let d_pol4 = Math.min(form.value.policy_4.length * 0.5, 3.0);
   let d_pol5 = Math.min(form.value.policy_5.length * 0.5, 3.0);
@@ -1161,7 +1391,7 @@ const saveSignature = async () => {
   await silentAutoSave();
 };
 
-const onExportFeedbackSummary = async () => {
+const onExportFeedbackSummary = async (filterType = 'all') => {
   if (!selectedAreaCode.value) return;
   if (exportingFeedback.value) return;
   exportingFeedback.value = true;
@@ -1182,7 +1412,8 @@ const onExportFeedbackSummary = async () => {
       township_name: selectedTownshipName.value,
       village_name: selectedVillageName.value,
       qsdwmc: selectedAreaName.value,
-      form_data: form.value
+      form_data: form.value,
+      filter_type: filterType
     });
 
     if (res.data.code === 200 && res.data.url) {
@@ -1236,7 +1467,7 @@ const onExportAtt6 = async () => {
   }
 };
 
-const onExportAtt7 = async () => {
+const onExportAtt7 = async (includeSevere = true) => {
   exporting7.value = true;
   showLoadingToast({ message: '正在汇总生成附件7得分表...', forbidClick: true });
   try {
@@ -1251,7 +1482,7 @@ const onExportAtt7 = async () => {
       });
     }
     
-    const res = await axios.get('/api/export_neiye_att7');
+    const res = await axios.get('/api/export_neiye_att7?include_severe=' + includeSevere);
     if (res.data.code === 200 && res.data.url) {
       showToast({ type: 'success', message: '附件7已生成，正在下载...' });
       triggerDownload(res.data.url);
@@ -1328,6 +1559,12 @@ const onExportAtt7 = async () => {
 .stepper-unit {
   font-size: 14px;
   color: #646566;
+}
+
+.other-input-wrap {
+  margin-bottom: 6px;
+  border-bottom: 1px dashed #d6e4ff;
+  padding-bottom: 4px;
 }
 
 .evidence-box {

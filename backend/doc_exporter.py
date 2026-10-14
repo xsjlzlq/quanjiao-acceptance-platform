@@ -1,5 +1,6 @@
 import os
 import re
+import uuid
 import shutil
 import pythoncom
 import win32com.client
@@ -69,7 +70,7 @@ def _insert_sign_img(doc, names, sign_data):
             shape.Height = 30
             shape.Width = 30 * ratio
 
-from datetime import datetime
+from datetime import datetime, date
 
 def replace_common_bookmarks(doc, county_name: str, date_str: str = None):
     """
@@ -162,18 +163,61 @@ def format_score(score):
         return f"{score:.1f}"
     return str(score)
 
-def calculate_neiye_subscores(form_data):
+def format_item_desc(field_name, item, form_data):
+    """格式化问题项描述，若为'其他'则附带用户填写的具体内容"""
+    if item == "其他":
+        other_txt = str(form_data.get(f"{field_name}_other") or form_data.get(f"{field_name}_other_desc") or "").strip()
+        return f"其他：{other_txt}" if other_txt else "其他"
+    return item
+
+# 严重错误清单 (29项)
+SEVERE_ISSUES = {
+    "未制定方案",  "直接套用上级方案", "制定程序不合法", "方案缺少",
+    "支付不规范", "支付不及时", "经费没有县级兜底",
+    "未召开村民会议", "未选举产生理事会", 
+    "违规召开村民会议", "理事会成员非本集体经济组织",
+    "没有进行摸底", "没有延包方案草案", "没有延包方案", "延包方案未上报", "延包方案未公示",
+    "延包方案与工作方案混淆", 
+    "没有公示材料", "没有公示或公示不足15天", 
+    "合同版本格式不正确", "合同网签率未达到95%", "没有地块示意图",
+    "未进行信息共享", "未与不动产登记部门有序衔接", "承包地块间重叠", "承包地块与宅基地重叠",
+    "档案整理第三方无涉密档案整理资质", "没有进行档案验收", "档案验收不符合相关标准"
+}
+
+# 较重错误清单 (16项)
+MAJOR_ISSUES = {
+    "打乱重分", "违法调整或收回承包地", "没有小调整统计资料或说明",
+    "未保障特殊群体权益", "未保障无地户权益", "没有统计（关注）特殊群体",
+    "没有应收尽收", "采用不正当方式隐匿消亡户", "违规处置消亡土地", "没有统计消亡户", "没有分清实际消亡户和伪消亡户",
+    "未建立矛盾纠纷处置机制", "未建立舆情处置办法", "没有矛盾纠纷处理台账",
+    "矛盾纠纷处理台账填写不规范", "没有本级处理的矛盾纠纷处理记录"
+}
+
+# 外业核查错误等级规则
+SEVERE_WAIYE = ["非本人签名", "面积不认可","权属不正确", "成员不符合"]
+MAJOR_WAIYE = []
+
+def calculate_neiye_subscores(form_data, exclude_severe: bool = False):
     # 1. 机制运行 (满分15)
-    d_m1 = 2.0 if form_data.get('mech_1') else 0.0
+    m1_list = [x for x in form_data.get('mech_1', []) if x]
+    if exclude_severe:
+        m1_list = [x for x in m1_list if x not in SEVERE_ISSUES]
+    d_m1 = 2.0 if m1_list else 0.0
+
     d_m2 = 0.0
     for opt in form_data.get('mech_2', []):
-        if '支付不规范' in opt: d_m2 += 4.0
-        elif '支付不及时' in opt: d_m2 += 4.0
-        elif '兜底' in opt: d_m2 += 2.0
+        if '支付不规范' in opt:
+            if not exclude_severe: d_m2 += 4.0
+        elif '支付不及时' in opt:
+            if not exclude_severe: d_m2 += 4.0
+        elif '兜底' in opt:
+            if not exclude_severe: d_m2 += 2.0
+        elif '其他' in opt:
+            d_m2 += 2.0
     d_m2 = min(d_m2, 10.0)
     d_m3 = 2.0 if form_data.get('mech_3') else 0.0
     
-    # 培训 (可为列表或count)
+    # 培训 (每项0.5分，包括其他，非严重项)
     if isinstance(form_data.get('mech_4'), list):
         d_m4 = min(len(form_data.get('mech_4', [])) * 0.5, 1.0)
     else:
@@ -183,46 +227,77 @@ def calculate_neiye_subscores(form_data):
     score_mech = max(15.0 - deduct_mech, 0.0)
     
     # 2. 程序规范 (满分30)
-    d_p1 = 5.0 if form_data.get('prog_1') else 0.0
-    d_p2 = min(len(form_data.get('prog_2', [])) * 0.5, 5.0)
-    d_p3 = 5.0 if form_data.get('prog_3') else 0.0
-    
-    p4_list = form_data.get('prog_4', [])
-    if any('没有公示材料' in x or '不足15天' in x for x in p4_list):
-        d_p4 = 2.0
-    else:
-        d_p4 = min(len(p4_list) * 0.5, 2.0)
-        
-    d_p5 = 3.0 if form_data.get('prog_5') else 0.0
-    
-    p6_list = form_data.get('prog_6', [])
-    if any(x in p6_list for x in ['未进行信息共享', '未与不动产登记部门有序衔接', '承包地块间重叠', '承包地块与宅基地重叠', '承包地块与其它自然资源部门要求的要素重叠']):
-        d_p6 = 5.0
-    else:
-        d_p6 = min(len(p6_list) * 0.5, 5.0)
+    p1_list = [x for x in form_data.get('prog_1', []) if x]
+    if exclude_severe:
+        p1_list = [x for x in p1_list if x not in SEVERE_ISSUES]
+    d_p1 = 5.0 if p1_list else 0.0
 
-    p7_list = form_data.get('prog_7', [])
-    if any(x in p7_list for x in ['档案整理第三方无涉密档案整理资质', '没有进行档案验收', '档案验收不符合相关标准']):
-        d_p7 = 5.0
+    p2_list = [x for x in form_data.get('prog_2', []) if x]
+    if exclude_severe:
+        p2_list = [x for x in p2_list if x not in SEVERE_ISSUES]
+    d_p2 = min(len(p2_list) * 0.5, 5.0)
+
+    p3_list = [x for x in form_data.get('prog_3', []) if x]
+    if exclude_severe:
+        p3_list = [x for x in p3_list if x not in SEVERE_ISSUES]
+    d_p3 = 5.0 if p3_list else 0.0
+    
+    p4_list = [x for x in form_data.get('prog_4', []) if x]
+    if exclude_severe:
+        p4_list = [x for x in p4_list if x not in SEVERE_ISSUES and '没有公示材料' not in x and '没有公示或公示不足15天' not in x]
+        if any('不足15天' in x for x in p4_list):
+            d_p4 = 2.0
+        else:
+            d_p4 = min(len(p4_list) * 0.5, 2.0)
     else:
+        if any('没有公示材料' in x or '不足15天' in x for x in p4_list):
+            d_p4 = 2.0
+        else:
+            d_p4 = min(len(p4_list) * 0.5, 2.0)
+        
+    p5_list = [x for x in form_data.get('prog_5', []) if x]
+    if exclude_severe:
+        p5_list = [x for x in p5_list if x not in SEVERE_ISSUES]
+    d_p5 = 3.0 if p5_list else 0.0
+    
+    p6_list = [x for x in form_data.get('prog_6', []) if x]
+    if exclude_severe:
+        p6_list = [x for x in p6_list if x not in SEVERE_ISSUES]
+        d_p6 = min(len(p6_list) * 0.5, 5.0)
+    else:
+        if any(x in p6_list for x in ['未进行信息共享', '未与不动产登记部门有序衔接', '承包地块间重叠', '承包地块与宅基地重叠', '承包地块与其它自然资源部门要求的要素重叠']):
+            d_p6 = 5.0
+        else:
+            d_p6 = min(len(p6_list) * 0.5, 5.0)
+
+    p7_list = [x for x in form_data.get('prog_7', []) if x]
+    if exclude_severe:
+        p7_list = [x for x in p7_list if x not in SEVERE_ISSUES]
         d_p7 = min(len(p7_list) * 1.0, 5.0)
+    else:
+        if any(x in p7_list for x in ['档案整理第三方无涉密档案整理资质', '没有进行档案验收', '档案验收不符合相关标准']):
+            d_p7 = 5.0
+        else:
+            d_p7 = min(len(p7_list) * 1.0, 5.0)
     
     deduct_prog = min(d_p1 + d_p2 + d_p3 + d_p4 + d_p5 + d_p6 + d_p7, 30.0)
     score_prog = max(30.0 - deduct_prog, 0.0)
     
-    # 3. 政策落实 (满分15)
+    # 3. 政策落实 (满分15) - 均为非严重项
     d_pol1 = min(len(form_data.get('policy_1', [])) * 1.0, 3.0)
     c_2_1 = float(form_data.get('policy_2_1', 0) or 0)
     c_2_2 = float(form_data.get('policy_2_2', 0) or 0)
     c_2_3 = float(form_data.get('policy_2_3', 0) or 0)
-    d_pol2 = min((c_2_1 + c_2_2 + c_2_3) * 1.0, 3.0)
+    c_2_other = 1.0 if ('其他' in form_data.get('policy_2', []) or form_data.get('policy_2_other_checked')) else 0.0
+    d_pol2 = min((c_2_1 + c_2_2 + c_2_3 + c_2_other) * 1.0, 3.0)
     
     c_3_1 = float(form_data.get('policy_3_1', 0) or 0)
     c_3_2 = float(form_data.get('policy_3_2', 0) or 0)
     c_3_3 = float(form_data.get('policy_3_3', 0) or 0)
     c_3_4 = float(form_data.get('policy_3_4', 0) or 0)
     c_3_5 = float(form_data.get('policy_3_5', 0) or 0)
-    d_pol3 = min((c_3_1 + c_3_2 + c_3_3 + c_3_4 + c_3_5) * 1.0, 3.0)
+    c_3_other = 1.0 if ('其他' in form_data.get('policy_3', []) or form_data.get('policy_3_other_checked')) else 0.0
+    d_pol3 = min((c_3_1 + c_3_2 + c_3_3 + c_3_4 + c_3_5 + c_3_other) * 1.0, 3.0)
     
     d_pol4 = min(len(form_data.get('policy_4', [])) * 0.5, 3.0)
     d_pol5 = min(len(form_data.get('policy_5', [])) * 0.5, 3.0)
@@ -230,7 +305,7 @@ def calculate_neiye_subscores(form_data):
     deduct_policy = min(d_pol1 + d_pol2 + d_pol3 + d_pol4 + d_pol5, 15.0)
     score_policy = max(15.0 - deduct_policy, 0.0)
     
-    # 4. 工作成效 (满分10)
+    # 4. 工作成效 (满分10) - 均为非严重项
     deduct_effect = min(len(form_data.get('effect_1', [])) * 1.0, 10.0)
     score_effect = max(10.0 - deduct_effect, 0.0)
     
@@ -254,25 +329,25 @@ def calculate_neiye_subscores(form_data):
 
 def fill_table_1(t1, form_data, scores):
     # R2: 配套延包
-    items_1 = [x for x in form_data.get("mech_1", []) if x]
+    items_1 = [format_item_desc("mech_1", x, form_data) for x in form_data.get("mech_1", []) if x]
     t1.Rows(2).Cells(4).Range.Text = "\n".join(items_1) if items_1 else "无"
     t1.Rows(2).Cells(5).Range.Text = "/"
     t1.Rows(2).Cells(6).Range.Text = f"{scores['deduct']['m1']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['m1'] > 0 else "0"
     
     # R3: 经费保障
-    items_2 = [x for x in form_data.get("mech_2", []) if x]
+    items_2 = [format_item_desc("mech_2", x, form_data) for x in form_data.get("mech_2", []) if x]
     t1.Rows(3).Cells(4).Range.Text = "\n".join(items_2) if items_2 else "无"
     t1.Rows(3).Cells(5).Range.Text = "/"
     t1.Rows(3).Cells(6).Range.Text = f"{scores['deduct']['m2']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['m2'] > 0 else "0"
 
     # R4: 宣传
-    items_3 = [x for x in form_data.get("mech_3", []) if x]
+    items_3 = [format_item_desc("mech_3", x, form_data) for x in form_data.get("mech_3", []) if x]
     t1.Rows(4).Cells(4).Range.Text = "\n".join(items_3) if items_3 else "无"
     t1.Rows(4).Cells(5).Range.Text = "/"
     t1.Rows(4).Cells(6).Range.Text = f"{scores['deduct']['m3']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['m3'] > 0 else "0"
 
     # R5: 培训
-    items_4 = [x for x in form_data.get("mech_4", []) if x]
+    items_4 = [format_item_desc("mech_4", x, form_data) for x in form_data.get("mech_4", []) if x]
     t1.Rows(5).Cells(4).Range.Text = "\n".join(items_4) if items_4 else "无"
     t1.Rows(5).Cells(5).Range.Text = "/"
     t1.Rows(5).Cells(6).Range.Text = f"{scores['deduct']['m4']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['m4'] > 0 else "0"
@@ -290,43 +365,43 @@ def fill_table_1(t1, form_data, scores):
 
 def fill_table_2(t2, form_data, scores):
     # R2: 成立机构
-    items_1 = [x for x in form_data.get("prog_1", []) if x]
+    items_1 = [format_item_desc("prog_1", x, form_data) for x in form_data.get("prog_1", []) if x]
     t2.Rows(2).Cells(4).Range.Text = "\n".join(items_1) if items_1 else "无"
     t2.Rows(2).Cells(5).Range.Text = "/"
     t2.Rows(2).Cells(6).Range.Text = f"{scores['deduct']['p1']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['p1'] > 0 else "0"
 
     # R3: 摸底核实
-    items_2 = [x for x in form_data.get("prog_2", []) if x]
+    items_2 = [format_item_desc("prog_2", x, form_data) for x in form_data.get("prog_2", []) if x]
     t2.Rows(3).Cells(4).Range.Text = "\n".join(items_2) if items_2 else "无"
     t2.Rows(3).Cells(5).Range.Text = "/"
     t2.Rows(3).Cells(6).Range.Text = f"{scores['deduct']['p2']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['p2'] > 0 else "0"
 
     # R4: 制定方案
-    items_3 = [x for x in form_data.get("prog_3", []) if x]
+    items_3 = [format_item_desc("prog_3", x, form_data) for x in form_data.get("prog_3", []) if x]
     t2.Rows(4).Cells(4).Range.Text = "\n".join(items_3) if items_3 else "无"
     t2.Rows(4).Cells(5).Range.Text = "/"
     t2.Rows(4).Cells(6).Range.Text = f"{scores['deduct']['p3']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['p3'] > 0 else "0"
 
     # R5: 调查公示
-    items_4 = [x for x in form_data.get("prog_4", []) if x]
+    items_4 = [format_item_desc("prog_4", x, form_data) for x in form_data.get("prog_4", []) if x]
     t2.Rows(5).Cells(4).Range.Text = "\n".join(items_4) if items_4 else "无"
     t2.Rows(5).Cells(5).Range.Text = "/"
     t2.Rows(5).Cells(6).Range.Text = f"{scores['deduct']['p4']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['p4'] > 0 else "0"
 
     # R6: 签订合同
-    items_5 = [x for x in form_data.get("prog_5", []) if x]
+    items_5 = [format_item_desc("prog_5", x, form_data) for x in form_data.get("prog_5", []) if x]
     t2.Rows(6).Cells(4).Range.Text = "\n".join(items_5) if items_5 else "无"
     t2.Rows(6).Cells(5).Range.Text = "/"
     t2.Rows(6).Cells(6).Range.Text = f"{scores['deduct']['p5']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['p5'] > 0 else "0"
 
     # R7: 完善证书
-    items_6 = [x for x in form_data.get("prog_6", []) if x]
+    items_6 = [format_item_desc("prog_6", x, form_data) for x in form_data.get("prog_6", []) if x]
     t2.Rows(7).Cells(4).Range.Text = "\n".join(items_6) if items_6 else "无"
     t2.Rows(7).Cells(5).Range.Text = "/"
     t2.Rows(7).Cells(6).Range.Text = f"{scores['deduct']['p6']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['p6'] > 0 else "0"
 
     # R8: 资料归档
-    items_7 = [x for x in form_data.get("prog_7", []) if x]
+    items_7 = [format_item_desc("prog_7", x, form_data) for x in form_data.get("prog_7", []) if x]
     t2.Rows(8).Cells(4).Range.Text = "\n".join(items_7) if items_7 else "无"
     t2.Rows(8).Cells(5).Range.Text = "/"
     t2.Rows(8).Cells(6).Range.Text = f"{scores['deduct']['p7']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['p7'] > 0 else "0"
@@ -347,12 +422,12 @@ def fill_table_2(t2, form_data, scores):
 
 def fill_table_3(t3, form_data, scores):
     # R2: 大稳定、小调整
-    items_1 = [x for x in form_data.get("policy_1", []) if x]
+    items_1 = [format_item_desc("policy_1", x, form_data) for x in form_data.get("policy_1", []) if x]
     t3.Rows(2).Cells(4).Range.Text = "\n".join(items_1) if items_1 else "无"
     t3.Rows(2).Cells(5).Range.Text = "/"
     t3.Rows(2).Cells(6).Range.Text = f"{scores['deduct']['pol1']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['pol1'] > 0 else "0"
 
-    # R3: 保障土地承包权益 (带数量)
+    # R3: 保障土地承包权益 (带数量 + 其他)
     items_2 = []
     c_2_1 = int(form_data.get("policy_2_1", 0) or 0)
     c_2_2 = int(form_data.get("policy_2_2", 0) or 0)
@@ -360,11 +435,13 @@ def fill_table_3(t3, form_data, scores):
     if c_2_1 > 0: items_2.append(f"未保障特殊群体权益（{c_2_1}起）")
     if c_2_2 > 0: items_2.append(f"未保障无地户权益（{c_2_2}起）")
     if c_2_3 > 0: items_2.append(f"没有统计（关注）特殊群体（{c_2_3}起）")
+    if "其他" in form_data.get("policy_2", []) or form_data.get("policy_2_other_checked"):
+        items_2.append(format_item_desc("policy_2", "其他", form_data))
     t3.Rows(3).Cells(4).Range.Text = "\n".join(items_2) if items_2 else "无"
     t3.Rows(3).Cells(5).Range.Text = "/"
     t3.Rows(3).Cells(6).Range.Text = f"{scores['deduct']['pol2']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['pol2'] > 0 else "0"
 
-    # R4: 依法收回消亡户承包地 (带数量)
+    # R4: 依法收回消亡户承包地 (带数量 + 其他)
     items_3 = []
     c_3_1 = int(form_data.get("policy_3_1", 0) or 0)
     c_3_2 = int(form_data.get("policy_3_2", 0) or 0)
@@ -376,18 +453,20 @@ def fill_table_3(t3, form_data, scores):
     if c_3_3 > 0: items_3.append(f"违规处置消亡土地（{c_3_3}起）")
     if c_3_4 > 0: items_3.append(f"没有统计消亡户（{c_3_4}起）")
     if c_3_5 > 0: items_3.append(f"没有分清实际消亡户和伪消亡户（{c_3_5}起）")
+    if "其他" in form_data.get("policy_3", []) or form_data.get("policy_3_other_checked"):
+        items_3.append(format_item_desc("policy_3", "其他", form_data))
     t3.Rows(4).Cells(4).Range.Text = "\n".join(items_3) if items_3 else "无"
     t3.Rows(4).Cells(5).Range.Text = "/"
     t3.Rows(4).Cells(6).Range.Text = f"{scores['deduct']['pol3']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['pol3'] > 0 else "0"
 
     # R5: 严格机动地和新增耕地管理
-    items_4 = [x for x in form_data.get("policy_4", []) if x]
+    items_4 = [format_item_desc("policy_4", x, form_data) for x in form_data.get("policy_4", []) if x]
     t3.Rows(5).Cells(4).Range.Text = "\n".join(items_4) if items_4 else "无"
     t3.Rows(5).Cells(5).Range.Text = "/"
     t3.Rows(5).Cells(6).Range.Text = f"{scores['deduct']['pol4']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['pol4'] > 0 else "0"
 
     # R6: 从严掌握确权确股不确地
-    items_5 = [x for x in form_data.get("policy_5", []) if x]
+    items_5 = [format_item_desc("policy_5", x, form_data) for x in form_data.get("policy_5", []) if x]
     t3.Rows(6).Cells(4).Range.Text = "\n".join(items_5) if items_5 else "无"
     t3.Rows(6).Cells(5).Range.Text = "/"
     t3.Rows(6).Cells(6).Range.Text = f"{scores['deduct']['pol5']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['pol5'] > 0 else "0"
@@ -406,7 +485,7 @@ def fill_table_3(t3, form_data, scores):
 
 def fill_table_4(t4, form_data, scores):
     # R2: 加强风险防范
-    items_1 = [x for x in form_data.get("effect_1", []) if x]
+    items_1 = [format_item_desc("effect_1", x, form_data) for x in form_data.get("effect_1", []) if x]
     t4.Rows(2).Cells(4).Range.Text = "\n".join(items_1) if items_1 else "无"
     t4.Rows(2).Cells(5).Range.Text = "/"
     t4.Rows(2).Cells(6).Range.Text = f"{scores['deduct']['effect']:.1f}".rstrip('0').rstrip('.') if scores['deduct']['effect'] > 0 else "0"
@@ -590,7 +669,7 @@ def export_neiye_att6_mech_and_effect(form_data, is_county=False, township_name=
     finally:
         pythoncom.CoUninitialize()
 
-def export_neiye_att7(records_by_qsdwdm, township_villages_map=None):
+def export_neiye_att7(records_by_qsdwdm, township_villages_map=None, exclude_severe: bool = False):
     pythoncom.CoInitialize()
     try:
         from database import get_county_and_townships_sync
@@ -605,7 +684,8 @@ def export_neiye_att7(records_by_qsdwdm, township_villages_map=None):
         base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件7.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_filename = f"附件7_{county_name}县级自查内业组检查得分表.doc"
+        file_suffix = "_排除严重问题" if exclude_severe else ""
+        out_filename = f"附件7_{county_name}县级自查内业组检查得分表{file_suffix}.doc"
         out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         shutil.copy(tpl, out_path)
         
@@ -616,7 +696,7 @@ def export_neiye_att7(records_by_qsdwdm, township_villages_map=None):
         # 1. 县级行 (Row 2) - 机制运行(15分) + 工作成效(10分)
         county_rec = records_by_qsdwdm.get(county_code) or records_by_qsdwdm.get("341124")
         if county_rec:
-            c_scores = calculate_neiye_subscores(county_rec.get("form_data", {}))
+            c_scores = calculate_neiye_subscores(county_rec.get("form_data", {}), exclude_severe=exclude_severe)
             county_mech = c_scores['score']['mech']
             county_effect = c_scores['score']['effect']
         else:
@@ -658,7 +738,7 @@ def export_neiye_att7(records_by_qsdwdm, township_villages_map=None):
             township_self_mech = None
             township_self_effect = None
             if township_rec:
-                ts_scores = calculate_neiye_subscores(township_rec.get("form_data", {}))["score"]
+                ts_scores = calculate_neiye_subscores(township_rec.get("form_data", {}), exclude_severe=exclude_severe)["score"]
                 township_self_mech = ts_scores["mech"]
                 township_self_effect = ts_scores["effect"]
 
@@ -676,7 +756,7 @@ def export_neiye_att7(records_by_qsdwdm, township_villages_map=None):
             
             if village_recs or township_self_mech is not None or township_self_effect is not None:
                 count_evaluated += 1
-                v_scores = [calculate_neiye_subscores(vr.get("form_data", {}))["score"] for vr in village_recs]
+                v_scores = [calculate_neiye_subscores(vr.get("form_data", {}), exclude_severe=exclude_severe)["score"] for vr in village_recs]
                 k = len(v_scores)
                 
                 # 计算下属抽样村各项指标平均分
@@ -878,7 +958,7 @@ def export_docs(stats_data, att8_data, township_code, township_name):
     url = export_att5(stats_data, township_code, township_name)
     return [url]
 
-def export_waiye_att8(township_name, village_name, group_name, group_rows):
+def export_waiye_att8(township_name, village_name, group_name, group_rows, survey_date=None):
     pythoncom.CoInitialize()
     word = None
     try:
@@ -911,10 +991,51 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
         county_name = county_info.get("name", "全椒县")
         replace_common_bookmarks(doc8, county_name)
 
-        now = datetime.now()
-        date_str = f"{now.year} 年  {now.month:02d}  月  {now.day:02d}  日"
-        p3 = doc8.Paragraphs(3)
-        rng = p3.Range
+        # 调查时间：优先使用传入的 survey_date，若未传则从 waiye_inquiries 查询 updated_at
+        if survey_date is None:
+            try:
+                from database import get_sync_engine
+                from sqlalchemy import text
+                s_eng = get_sync_engine()
+                with s_eng.connect() as conn:
+                    # 优先组级问询时间
+                    res_inq = conn.execute(text("""
+                        SELECT updated_at FROM waiye_inquiries
+                        WHERE township_name = :tn AND village_name = :vn AND group_name = :gn AND cbfbm NOT LIKE 'VILLAGE_%'
+                          AND updated_at IS NOT NULL
+                        ORDER BY updated_at DESC LIMIT 1
+                    """), {"tn": township_name, "vn": village_name, "gn": group_name}).scalar()
+                    if not res_inq:
+                        # 兜底取该行政村现场会问询时间
+                        res_inq = conn.execute(text("""
+                            SELECT updated_at FROM waiye_inquiries
+                            WHERE township_name = :tn AND village_name = :vn AND updated_at IS NOT NULL
+                            ORDER BY updated_at DESC LIMIT 1
+                        """), {"tn": township_name, "vn": village_name}).scalar()
+                    if res_inq:
+                        survey_date = res_inq
+            except Exception as e:
+                print(f"查询外业调查时间异常: {e}")
+
+        if survey_date:
+            if isinstance(survey_date, (datetime, date)):
+                date_str = f"{survey_date.year} 年  {survey_date.month:02d}  月  {survey_date.day:02d}  日"
+            elif isinstance(survey_date, str):
+                clean_s = survey_date.strip()
+                try:
+                    dt_parsed = datetime.fromisoformat(clean_s.replace("Z", "+00:00"))
+                    date_str = f"{dt_parsed.year} 年  {dt_parsed.month:02d}  月  {dt_parsed.day:02d}  日"
+                except Exception:
+                    date_str = clean_s
+            else:
+                now = datetime.now()
+                date_str = f"{now.year} 年  {now.month:02d}  月  {now.day:02d}  日"
+        else:
+            now = datetime.now()
+            date_str = f"{now.year} 年  {now.month:02d}  月  {now.day:02d}  日"
+
+        p2 = doc8.Paragraphs(2)
+        rng = p2.Range
         rng.End = rng.End - 1
         rng.Text = f"   乡镇：{township_name} \t行政村：{village_name} \t村民小组：{group_name}" + " "*25 + date_str
         
@@ -968,7 +1089,18 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
             t8.Cell(r_idx, 1).Range.Text = str(i + 1)
             t8.Cell(r_idx, 5).Range.Text = str(r.get('dkmc', '') or r.get('地块名称', ''))
             t8.Cell(r_idx, 6).Range.Text = str(r.get('dkbm_short', '') or r.get('地块简编码', ''))
-            t8.Cell(r_idx, 7).Range.Text = str(r.get('scmj', '') or r.get('成果面积(亩)', ''))
+            
+            # 第 7 列：成果面积(亩)，直接取 scmj
+            raw_area = r.get('scmj')
+            if raw_area is None:
+                raw_area = r.get('scmjm') if r.get('scmjm') is not None else (r.get('成果面积(亩)') or r.get('实测面积(亩)') or r.get('实测面积亩'))
+            if raw_area is not None and str(raw_area).strip() != '':
+                try:
+                    t8.Cell(r_idx, 7).Range.Text = f"{float(raw_area):.2f}"
+                except (ValueError, TypeError):
+                    t8.Cell(r_idx, 7).Range.Text = str(raw_area)
+            else:
+                t8.Cell(r_idx, 7).Range.Text = "/"
 
             # 地块级核查指标
             for c_pos, k_name in [(8, 'area_acknowledged'), (10, 'bound_correct'), (12, 'self_verified')]:
@@ -1082,7 +1214,7 @@ def export_waiye_att8(township_name, village_name, group_name, group_rows):
     finally:
         pythoncom.CoUninitialize()
 
-def export_waiye_att9(samples_rows):
+def export_waiye_att9(samples_rows, exclude_severe: bool = False):
     pythoncom.CoInitialize()
     word = None
     doc = None
@@ -1099,7 +1231,8 @@ def export_waiye_att9(samples_rows):
         base_dir = get_base_dir()
         tpl = os.path.join(base_dir, "附件", "附件9.doc")
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_filename = f"附件9_{county_name}县级自查外业组检查得分表.doc"
+        file_suffix = "_排除严重问题" if exclude_severe else ""
+        out_filename = f"附件9_{county_name}县级自查外业组检查得分表{file_suffix}.doc"
         out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         if os.path.exists(out_path):
             try: os.remove(out_path)
@@ -1126,7 +1259,9 @@ def export_waiye_att9(samples_rows):
             processed_cbfs = set()
             c_cnt = 0
             for r in g_rows:
-                for k in ["area_acknowledged", "bound_correct", "self_verified"]:
+                # 地块错误项：面积不认可属于严重问题；四至不正确、非本人核实属于非严重问题
+                dk_keys = ["bound_correct", "self_verified"] if exclude_severe else ["area_acknowledged", "bound_correct", "self_verified"]
+                for k in dk_keys:
                     if r.get(k) == "X":
                         total_errors += 1
                 
@@ -1134,9 +1269,11 @@ def export_waiye_att9(samples_rows):
                 if cbf_key not in processed_cbfs:
                     processed_cbfs.add(cbf_key)
                     c_cnt += 1
-                    for k in ["rights_correct", "member_qualified", "self_signed"]:
-                        if r.get(k) == "X":
-                            total_errors += 1
+                    # 农户错误项：权属不正确、成员不符合、非本人签名属于严重问题；联系电话不正确属于非严重问题
+                    if not exclude_severe:
+                        for k in ["rights_correct", "member_qualified", "self_signed"]:
+                            if r.get(k) == "X":
+                                total_errors += 1
                     if str(r.get('phone_correct', '')).strip() == 'X':
                         total_errors += 1
                     if r.get("satisfaction") == "满意":
@@ -1320,7 +1457,7 @@ WAIYE_FLAG_LABELS = [
     ("phone_correct", "联系电话不正确"),
 ]
 
-def _build_rectify_rows(neiye_form, waiye_rows, township_name):
+def _build_rectify_rows(neiye_input, waiye_rows, township_name, exclude_severe: bool = False):
     rows = []
     
     MAJOR_NEIYE = [
@@ -1357,42 +1494,101 @@ def _build_rectify_rows(neiye_form, waiye_rows, township_name):
         if isinstance(v, str): return [v] if v else []
         if isinstance(v, list): return v
         return []
+
+    # 规范化 neiye_input：支持单个 dict 或多条记录的 list
+    neiye_record_list = []
+    if isinstance(neiye_input, list):
+        neiye_record_list = neiye_input
+    elif isinstance(neiye_input, dict):
+        neiye_record_list = [{"qsdwdm": "", "qsdwmc": township_name, "level": "township", "form_data": neiye_input}]
     
-    if isinstance(neiye_form, dict):
-        # 列表型问题字段
-        for key, val in neiye_form.items():
-            items = _norm_list(val)
-            for item in items:
-                if item:
-                    item_str = str(item)
-                    rows.append({
+    township_neiye_rows = []
+    village_neiye_rows = []
+
+    for n_rec in neiye_record_list:
+        if isinstance(n_rec, dict):
+            fd = n_rec.get("form_data") or n_rec
+            rec_mc = n_rec.get("qsdwmc") or township_name
+            rec_lvl = n_rec.get("level") or ""
+        elif isinstance(n_rec, (list, tuple)) and len(n_rec) >= 4:
+            fd = n_rec[3] or {}
+            rec_mc = n_rec[1] or township_name
+            rec_lvl = n_rec[2] or ""
+        else:
+            continue
+
+        # 确定问题定位前缀与责任单位
+        clean_mc = str(rec_mc).replace("(乡镇级 - 机制运行)", "").replace("(乡镇级 - 机制与成效)", "").replace("乡镇级", "").strip()
+        is_village = (rec_lvl == "village" or (" - " in clean_mc) or (clean_mc != township_name and not clean_mc.endswith("镇") and not clean_mc.endswith("乡")))
+        
+        if is_village:
+            if " - " in clean_mc:
+                v_name = clean_mc.split(" - ", 1)[-1].strip()
+            else:
+                v_name = clean_mc.replace(township_name, "").strip() or clean_mc
+            unit_prefix = f"{township_name}{v_name}" if not v_name.startswith(township_name) else v_name
+            resp_unit = f"{v_name}村委会" if not v_name.endswith("村") and not v_name.endswith("社区") and not v_name.endswith("村委会") else f"{v_name}"
+            target_bucket = village_neiye_rows
+        else:
+            unit_prefix = township_name
+            resp_unit = f"{township_name}人民政府" if not township_name.endswith("政府") else township_name
+            target_bucket = township_neiye_rows
+
+        if isinstance(fd, dict):
+            VALID_NEIYE_PROBLEM_KEYS = {
+                "mech_1", "mech_2", "mech_3", "mech_4",
+                "prog_1", "prog_2", "prog_3", "prog_4", "prog_5", "prog_6", "prog_7",
+                "policy_1", "policy_2", "policy_3", "policy_4", "policy_5",
+                "effect_1"
+            }
+            # 列表型问题字段（包含各子项勾选的“其他”，严格限定为合法核查问题键，过滤检查者、复核者等元数据）
+            for key, val in fd.items():
+                if key not in VALID_NEIYE_PROBLEM_KEYS:
+                    continue
+                if not isinstance(val, list):
+                    continue
+                items = _norm_list(val)
+                for item in items:
+                    if item:
+                        item_str = format_item_desc(key, str(item).strip(), fd)
+                        lvl_item = get_level(item_str, is_neiye=True)
+                        if exclude_severe and lvl_item == "严重":
+                            continue
+                        target_bucket.append({
+                            "source": "内业",
+                            "level": lvl_item,
+                            "desc": f"{unit_prefix} {item_str}",
+                            "scope": "/",
+                            "unit": resp_unit,
+                        })
+            # 数量型问题字段：未保障特殊/无地户权益、消亡户应收尽收、不正当隐匿消亡户等
+            policy_fields = [
+                ("policy_2_1", "未保障特殊群体权益"),
+                ("policy_2_2", "未保障无地户权益"),
+                ("policy_2_3", "没有统计（关注）特殊群体"),
+                ("policy_3_1", "没有应收尽收"),
+                ("policy_3_2", "采用不正当方式隐匿消亡户"),
+                ("policy_3_3", "违规处置消亡土地"),
+                ("policy_3_4", "没有统计消亡户"),
+                ("policy_3_5", "没有分清实际消亡户和伪消亡户"),
+            ]
+            for key, label in policy_fields:
+                cnt = int(fd.get(key, 0) or 0)
+                if cnt > 0:
+                    lvl_pol = get_level(label, is_neiye=True)
+                    if exclude_severe and lvl_pol == "严重":
+                        continue
+                    target_bucket.append({
                         "source": "内业",
-                        "level": get_level(item_str, is_neiye=True),
-                        "desc": f"{township_name} {item_str}",
-                        "scope": "",
-                        "unit": township_name,
+                        "level": lvl_pol,
+                        "desc": f"{unit_prefix} {label}（{cnt}起）",
+                        "scope": str(cnt),
+                        "unit": resp_unit,
                     })
-        # 数量型问题字段：未保障特殊/无地户权益、消亡户应收尽收、不正当隐匿消亡户等
-        policy_fields = [
-            ("policy_2_1", "未保障特殊群体权益"),
-            ("policy_2_2", "未保障无地户权益"),
-            ("policy_2_3", "没有统计（关注）特殊群体"),
-            ("policy_3_1", "没有应收尽收"),
-            ("policy_3_2", "采用不正当方式隐匿消亡户"),
-            ("policy_3_3", "违规处置消亡土地"),
-            ("policy_3_4", "没有统计消亡户"),
-            ("policy_3_5", "没有分清实际消亡户和伪消亡户"),
-        ]
-        for key, label in policy_fields:
-            cnt = int(neiye_form.get(key, 0) or 0)
-            if cnt > 0:
-                rows.append({
-                    "source": "内业",
-                    "level": get_level(label, is_neiye=True),
-                    "desc": f"{township_name} {label}（{cnt}起）",
-                    "scope": str(cnt),
-                    "unit": township_name,
-                })
+
+    # 乡镇级内业问题优先排在最前，村级内业问题紧随其后
+    rows.extend(township_neiye_rows)
+    rows.extend(village_neiye_rows)
     # 外业问题：waiye_samples 中按户和地块分组
     CBF_ERRORS = [
         ("phone_correct", "联系电话不正确"),
@@ -1416,9 +1612,15 @@ def _build_rectify_rows(neiye_form, waiye_rows, township_name):
         first_r = group_rows[0]
         cbf_failed = [lbl for key, lbl in CBF_ERRORS if str(first_r.get(key, "")).strip() == "X"]
         
+        # 若只导出非严重问题，过滤掉严重问题项
+        if exclude_severe:
+            cbf_failed = [lbl for lbl in cbf_failed if lbl not in SEVERE_WAIYE]
+
         dk_failed_list = []
         for r in group_rows:
             dk_failed = [lbl for key, lbl in DK_ERRORS if str(r.get(key, "")).strip() == "X"]
+            if exclude_severe:
+                dk_failed = [lbl for lbl in dk_failed if lbl not in SEVERE_WAIYE]
             if dk_failed:
                 dk_name = r.get("dkbm_short", "") or r.get("dkmc", "")
                 dk_failed_list.append(f"{dk_name}地块，{'、'.join(dk_failed)}")
@@ -1434,21 +1636,24 @@ def _build_rectify_rows(neiye_form, waiye_rows, township_name):
                 
             desc_str = "\n".join(desc_parts)
             lvl = get_level(desc_str, is_neiye=False)
+            if exclude_severe and lvl == "严重":
+                continue
             
             rows.append({
                 "source": "外业",
                 "level": lvl,
                 "desc": f"{loc}，{desc_str}",
-                "scope": "",
+                "scope": "/",
                 "unit": village_name or township_name,
             })
             
     if not rows:
+        empty_msg = "经自查，暂未发现需整改的非严重问题" if exclude_severe else "经自查，暂未发现需整改的问题"
         rows.append({
             "source": "",
             "level": "",
-            "desc": "经自查，暂未发现需整改的问题",
-            "scope": "",
+            "desc": empty_msg,
+            "scope": "/",
             "unit": township_name,
         })
     return rows
@@ -1507,7 +1712,44 @@ def export_rectify_att12(township_name):
     finally:
         pythoncom.CoUninitialize()
 
-def export_rectify_att13(township_name, neiye_form, waiye_rows):
+RECTIFY_MEASURE_RULES = [
+    ("盖章或非红头", "补充手续"),
+    ("分工不明确", "明确分工"),
+    ("参会人数", "确认核实参会人数"),
+    ("时间顺序", "调整时间顺序"),
+    ("制作粗糙", "精细处理"),
+    ("无签到表", "补充签到表"),
+    ("会议纪要", "补充会议纪要"),
+    ("机制", "补充完善"),
+    ("矛盾纠纷", "补充统计"),
+    ("特殊成员", "补充统计"),
+    ("特殊农户", "补充统计"),
+    ("特殊人员", "补充统计"),
+    ("特殊群体", "补充统计"),
+    ("新增耕地", "补充统计"),
+    ("小调整", "补充统计或说明"),
+    ("确权确亩", "补充统计或说明"),
+    ("宣传", "补充收集宣传材料"),
+    ("培训", "补充收集培训材料"),
+    ("舆情", "补充处置办法"),
+    ("公示", "补充公示确认"),
+    ("签署", "完善签署"),
+    ("签名", "完善签署"),
+    ("电话", "补充更新电话号码"),
+    ("四至", "核实四至"),
+    ("齐全", "补充完善"),
+]
+
+def match_rectify_measure(desc_text: str) -> str:
+    """根据问题具体描述智能匹配整改措施，未匹配到任何关键词时默认值为'对照问题逐项整改'"""
+    if not desc_text:
+        return "对照问题逐项整改"
+    for kw, measure in RECTIFY_MEASURE_RULES:
+        if kw in desc_text:
+            return measure
+    return "对照问题逐项整改"
+
+def export_rectify_att13(township_name, neiye_form, waiye_rows, exclude_severe: bool = False, plan_deadline: str = "", actual_finish_date: str = ""):
     pythoncom.CoInitialize()
     word = None
     doc = None
@@ -1520,7 +1762,9 @@ def export_rectify_att13(township_name, neiye_form, waiye_rows):
         tpl = os.path.join(base_dir, "附件", "附件13.doc")
         clean_ts = sanitize_filename(township_name)
         os.makedirs(os.path.join(base_dir, "backend", "downloads"), exist_ok=True)
-        out_path = os.path.join(base_dir, "backend", "downloads", f"附件13_问题整改销号台账_{clean_ts}.doc")
+        file_suffix = "_非严重问题" if exclude_severe else ""
+        out_filename = f"附件13_问题整改销号台账_{clean_ts}{file_suffix}.doc"
+        out_path = os.path.join(base_dir, "backend", "downloads", out_filename)
         if os.path.exists(out_path):
             try: os.remove(out_path)
             except: pass
@@ -1538,7 +1782,7 @@ def export_rectify_att13(township_name, neiye_form, waiye_rows):
         while t.Rows.Count > 1:
             t.Rows(t.Rows.Count).Delete()
 
-        data_rows = _build_rectify_rows(neiye_form, waiye_rows, township_name)
+        data_rows = _build_rectify_rows(neiye_form, waiye_rows, township_name, exclude_severe=exclude_severe)
 
         for i, item in enumerate(data_rows):
             # 始终选中当前最后一行，在其下方插入新行，保证数据顺序正确
@@ -1558,10 +1802,14 @@ def export_rectify_att13(township_name, neiye_form, waiye_rows):
             t.Cell(r, 2).Range.Text = item["source"]                   # 问题来源
             t.Cell(r, 3).Range.Text = item.get("level", "一般")        # 问题等级
             t.Cell(r, 4).Range.Text = item["desc"]                     # 问题具体描述
-            t.Cell(r, 5).Range.Text = item.get("scope", "")            # 涉及资料/农户数量
+            scope_text = str(item.get("scope", "")).strip()
+            t.Cell(r, 5).Range.Text = scope_text if scope_text else "/" # 涉及资料/农户数量 默认为“/”
             t.Cell(r, 6).Range.Text = item.get("unit", "")             # 整改责任单位
-            t.Cell(r, 9).Range.Text = "对照问题逐项整改，补齐材料，规范程序"  # 整改措施
-            # 列13 复核情况、列15 销号状态保持为空
+            t.Cell(r, 9).Range.Text = match_rectify_measure(item.get("desc", ""))  # 整改措施（智能匹配/默认“对照问题逐项整改”）
+            t.Cell(r, 10).Range.Text = str(plan_deadline or "").strip()             # 计划完成时限
+            t.Cell(r, 11).Range.Text = str(actual_finish_date or "").strip()        # 实际完成时间
+            t.Cell(r, 13).Range.Text = "通过"                                       # 复核情况：通过
+            t.Cell(r, 15).Range.Text = "已销号"                                     # 销号状态：已销号
 
         # 在所有数据行插入完毕后，重新设置表头重复标题行（确保生效）
         t.Rows(1).HeadingFormat = True
@@ -1571,7 +1819,7 @@ def export_rectify_att13(township_name, neiye_form, waiye_rows):
         doc = None
         word.Quit()
         word = None
-        return f"/api/download?file=downloads/附件13_问题整改销号台账_{clean_ts}.doc"
+        return f"/api/download?file=downloads/{out_filename}"
     except Exception as e:
         print("export_rectify_att13 error:", e)
         if doc:
@@ -1584,16 +1832,15 @@ def export_rectify_att13(township_name, neiye_form, waiye_rows):
     finally:
         pythoncom.CoUninitialize()
 
-# 严重错误清单 (35项)
+# 严重错误清单 (29项)
 SEVERE_ISSUES = {
-    "未制定方案", "方案未盖章或非红头", "直接套用上级方案", "制定程序不合法", "方案缺少",
+    "未制定方案",  "直接套用上级方案", "制定程序不合法", "方案缺少",
     "支付不规范", "支付不及时", "经费没有县级兜底",
-    "未召开村民会议", "未选举产生理事会", "未公示理事会名单", "公示时间不足3天",
-    "参会人数不足法定数量", "违规召开村民会议", "理事会成员非本集体经济组织",
+    "未召开村民会议", "未选举产生理事会", 
+    "违规召开村民会议", "理事会成员非本集体经济组织",
     "没有进行摸底", "没有延包方案草案", "没有延包方案", "延包方案未上报", "延包方案未公示",
-    "未召开会议讨论延包方案", "延包方案上报与通过会议时间顺序不正确",
-    "延包方案与工作方案混淆", "理事会与工作领导小组混淆",
-    "没有公示材料", "没有公示或公示不足15天", "公示不足15天",
+    "延包方案与工作方案混淆", 
+    "没有公示材料", "没有公示或公示不足15天", 
     "合同版本格式不正确", "合同网签率未达到95%", "没有地块示意图",
     "未进行信息共享", "未与不动产登记部门有序衔接", "承包地块间重叠", "承包地块与宅基地重叠",
     "档案整理第三方无涉密档案整理资质", "没有进行档案验收", "档案验收不符合相关标准"
@@ -1609,8 +1856,8 @@ MAJOR_ISSUES = {
 }
 
 # 外业核查错误等级规则
-SEVERE_WAIYE = ["非本人签名", "面积不认可"]
-MAJOR_WAIYE = ["权属不正确", "成员不符合"]
+SEVERE_WAIYE = ["非本人签名", "面积不认可","权属不正确", "成员不符合"]
+MAJOR_WAIYE = []
 
 def get_waiye_issue_level(desc_text: str) -> str:
     """外业核查等级评定：严重 / 较重 / 一般"""
@@ -1623,7 +1870,9 @@ def get_waiye_issue_level(desc_text: str) -> str:
     return "一般"
 
 def get_issue_level_3tier(text_val: str) -> str:
-    """根据问题描述匹配严重、较重、一般（未列出的默认为一般）"""
+    """根据问题描述匹配严重、较重、一般（未列出的默认为一般，含“其他”项一律为一般）"""
+    if "其他" in text_val:
+        return "一般"
     for s in SEVERE_ISSUES:
         if s in text_val:
             return "严重"
@@ -1670,9 +1919,9 @@ def map_neiye_item_to_category_and_sub(key: str, item_text: str):
         return "工作成效", "加强风险防范"
     return "内业核查", "综合检查"
 
-def export_county_issue_feedback_summary(county_name=None):
+def export_county_issue_feedback_summary(county_name=None, exclude_severe: bool = False):
     """全县问题反馈记录表汇总快捷导出（自查整改模块调用，包含内业核查与外业核查）"""
-    return export_issue_feedback_summary_by_level(level="county", county_name=county_name, include_waiye=True)
+    return export_issue_feedback_summary_by_level(level="county", county_name=county_name, include_waiye=True, exclude_severe=exclude_severe)
 
 def export_issue_feedback_summary_by_level(
     level: str = "county",
@@ -1682,7 +1931,8 @@ def export_issue_feedback_summary_by_level(
     qsdwmc: str = "",
     county_name: str = None,
     current_form_data: dict = None,
-    include_waiye: bool = True
+    include_waiye: bool = True,
+    exclude_severe: bool = False
 ) -> str:
     """
     按核查对象层级（县级 / 乡镇级 / 行政村级）精准导出《问题反馈记录表汇总.doc》：
@@ -1690,7 +1940,8 @@ def export_issue_feedback_summary_by_level(
     - 横向 A4 版式，7 列：序号、所在行政区、错误大类、验收内容、错误等级、错误描述、照片或其它证据
     - 错误等级分三等：严重、较重、一般，未列出的默认为“一般”
     - include_waiye=False 时（内业核查模块调用）：仅导出内业核查问题，不包含外业核查；
-    - include_waiye=True 时（自查整改模块调用）：综合汇总内业核查与外业核查发现的全部问题。
+    - include_waiye=True 时（自查整改模块调用）：综合汇总内业核查与外业核查发现的全部问题；
+    - exclude_severe=True 时：剔除严重等级问题，仅导出较重与一般问题。
     """
     import os, shutil, win32com.client, pythoncom
     from PIL import Image, ImageOps
@@ -1712,18 +1963,19 @@ def export_issue_feedback_summary_by_level(
         clean_cname = sanitize_filename(county_name)
         clean_ts = sanitize_filename(township_name or "")
         clean_vn = sanitize_filename(village_name or "")
+        file_suffix = "_仅非严重记录" if exclude_severe else ""
 
         # 根据层级决定输出文件名和文档大标题
         if level == "village":
             loc_prefix = f"{clean_cname}{clean_ts}{clean_vn}" if (clean_ts or clean_vn) else clean_cname
-            out_filename = f"{loc_prefix}问题反馈记录表汇总.doc"
+            out_filename = f"{loc_prefix}问题反馈记录表汇总{file_suffix}.doc"
             title_text = f"【{clean_cname}{clean_ts}{clean_vn}】问题反馈记录表汇总"
         elif level == "township":
             loc_prefix = f"{clean_cname}{clean_ts}" if clean_ts else clean_cname
-            out_filename = f"{loc_prefix}问题反馈记录表汇总.doc"
+            out_filename = f"{loc_prefix}问题反馈记录表汇总{file_suffix}.doc"
             title_text = f"【{clean_cname}{clean_ts}】问题反馈记录表汇总"
         else: # county
-            out_filename = f"{clean_cname}问题反馈记录表汇总.doc"
+            out_filename = f"{clean_cname}问题反馈记录表汇总{file_suffix}.doc"
             title_text = f"{clean_cname}问题反馈记录表汇总"
 
         out_path = os.path.join(downloads_dir, out_filename)
@@ -1794,20 +2046,26 @@ def export_issue_feedback_summary_by_level(
 
                 evidences = fd.get("evidences", {})
 
-                # 列表型内业问题
+                # 列表型内业问题（包含各子项勾选的“其他”）
                 for k, v in fd.items():
-                    if isinstance(v, list) and k != "evidences":
+                    if k == "evidences" or k.endswith("_other") or k.endswith("_other_desc") or k.endswith("_checked"):
+                        continue
+                    if isinstance(v, list):
                         cat, sub = map_neiye_item_to_category_and_sub(k, "")
                         for item in v:
                             if item:
-                                item_str = str(item).strip()
-                                level_str = get_issue_level_3tier(item_str)
+                                orig_item = str(item).strip()
+                                item_str = format_item_desc(k, orig_item, fd)
+                                level_str = "一般" if "其他" in orig_item else get_issue_level_3tier(orig_item)
                                 
                                 p_list = []
-                                if item_str in evidences:
-                                    for img_obj in evidences[item_str]:
-                                        u = img_obj.get("url") if isinstance(img_obj, dict) else str(img_obj)
-                                        if u: p_list.append(u)
+                                # 检索证据图片：若为其他，优先 k_其他 避免键名冲突
+                                ev_keys = [f"{k}_其他", orig_item] if orig_item == "其他" else [orig_item]
+                                for ek in ev_keys:
+                                    if ek in evidences:
+                                        for img_obj in evidences[ek]:
+                                            u = img_obj.get("url") if isinstance(img_obj, dict) else str(img_obj)
+                                            if u and u not in p_list: p_list.append(u)
 
                                 all_issues.append({
                                     "area": area_name,
@@ -1929,6 +2187,10 @@ def export_issue_feedback_summary_by_level(
         f.Execute("XX县（市）", False, False, False, False, False, True, 1, False, f"{county_name}", 2)
         f.Execute("XX县", False, False, False, False, False, True, 1, False, f"{county_name}", 2)
 
+        # 若指定仅非严重记录，过滤掉严重问题
+        if exclude_severe:
+            all_issues = [iss for iss in all_issues if iss.get("level") != "严重"]
+
         t = doc.Tables(1)
         
         N_issues = len(all_issues)
@@ -1940,7 +2202,8 @@ def export_issue_feedback_summary_by_level(
             t.Cell(2, 3).Range.Text = "/"
             t.Cell(2, 4).Range.Text = "/"
             t.Cell(2, 5).Range.Text = "一般"
-            t.Cell(2, 6).Range.Text = "经核查，当前范围内未发现需整改的问题项。"
+            empty_msg = "经核查，当前范围内未发现需整改的非严重问题项。" if exclude_severe else "经核查，当前范围内未发现需整改的问题项。"
+            t.Cell(2, 6).Range.Text = empty_msg
             t.Cell(2, 7).Range.Text = ""
         else:
             while t.Rows.Count > 2:

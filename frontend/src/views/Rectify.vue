@@ -29,6 +29,26 @@
           is-link
           @click="showPicker = true"
         />
+        <van-field label="台账导出选项" label-width="110px">
+          <template #input>
+            <van-radio-group v-model="att13Filter" direction="horizontal">
+              <van-radio name="all">全部导出</van-radio>
+              <van-radio name="non_severe">只导出非严重问题</van-radio>
+            </van-radio-group>
+          </template>
+        </van-field>
+        <van-field
+          v-model="planDeadline"
+          label="计划完成时限"
+          placeholder="例如：2024年10月15日（选填）"
+          clearable
+        />
+        <van-field
+          v-model="actualFinishDate"
+          label="实际完成时间"
+          placeholder="例如：2024年10月20日（选填）"
+          clearable
+        />
       </van-cell-group>
 
       <div class="export-panel">
@@ -74,6 +94,9 @@ const router = useRouter()
 
 const areaText = ref('')
 const selectedTown = ref(null) // { code, name }
+const att13Filter = ref('all') // 'all' | 'non_severe'
+const planDeadline = ref('')
+const actualFinishDate = ref('')
 const showPicker = ref(false)
 const pickerColumns = ref([])
 
@@ -166,7 +189,10 @@ const onExportAtt13 = async () => {
   try {
     const res = await axios.get(
       '/api/export_rectify_att13?township_code=' + encodeURIComponent(selectedTown.value.code) +
-      '&township_name=' + encodeURIComponent(selectedTown.value.name)
+      '&township_name=' + encodeURIComponent(selectedTown.value.name) +
+      '&filter_type=' + encodeURIComponent(att13Filter.value) +
+      '&plan_deadline=' + encodeURIComponent(planDeadline.value || '') +
+      '&actual_finish_date=' + encodeURIComponent(actualFinishDate.value || '')
     )
     if (res.data.code === 200 && res.data.url) {
       triggerDownload(res.data.url)
